@@ -1,0 +1,23 @@
+*.iml
+.DS_Store
+
+# Gradle and local machine state
+.gradle/
+.gradle-home/
+.kotlin/
+/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+
+# Android SDK path and local secrets
+/local.properties
+local.properties
+*.jks
+*.keystore
+
+# IDE files
+/.idea/
+
+# Local tool state
+/.codex
