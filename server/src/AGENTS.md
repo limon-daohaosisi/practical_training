@@ -51,6 +51,18 @@ MVP 阶段的 server 应保持小而分层：
 - 调用 orchestrator 或 service
 - 返回结构化响应
 
+当前 `routes/` 目录采用按路由分文件夹组织的三文件法：
+
+- `xxx/xxx.route.ts`：路由注册
+- `xxx/xxx.handler.ts`：handler 实现
+- `xxx/xxx.schema.ts`：请求参数、请求体、响应结构的 schema 与类型
+
+例如：
+
+- `routes/health/health.route.ts`
+- `routes/health/health.handler.ts`
+- `routes/health/health.schema.ts`
+
 应该：
 
 - 保持 handler 足够薄
