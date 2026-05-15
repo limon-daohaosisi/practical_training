@@ -1,0 +1,46 @@
+openapi: 3.1.0
+info:
+  title: Guide Assistant Analyze API
+  version: 0.1.0
+  description: Contract for Android client to request screen guidance analysis.
+
+paths:
+  /analyze:
+    post:
+      summary: Analyze the current screen and return guidance instructions.
+      operationId: analyzeScreen
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - question
+              properties:
+                question:
+                  type: string
+                packageName:
+                  type: string
+                activityName:
+                  type: string
+                screenWidth:
+                  type: integer
+                screenHeight:
+                  type: integer
+                ocrText:
+                  type: string
+      responses:
+        "200":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                properties:
+                  status:
+                    type: string
+                  message:
+                    type: string
