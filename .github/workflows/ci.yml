@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - ".github/workflows/ci.yml"
+      - "android-app/**"
       - "server/**"
   push:
     branches:
       - main
     paths:
       - ".github/workflows/ci.yml"
+      - "android-app/**"
       - "server/**"
 
 concurrency:
@@ -20,8 +22,8 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build
+  server-build:
+    name: Server Build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -50,10 +52,10 @@ jobs:
       - name: Build
         run: pnpm run build
 
-  lint:
-    name: Lint & Format & Typecheck
+  server-lint:
+    name: Server Lint & Format & Typecheck
     runs-on: ubuntu-latest
-    needs: build
+    needs: server-build
     timeout-minutes: 10
     defaults:
       run:
@@ -87,10 +89,10 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
-  test:
-    name: Test
+  server-test:
+    name: Server Test
     runs-on: ubuntu-latest
-    needs: build
+    needs: server-build
     timeout-minutes: 10
     defaults:
       run:
@@ -117,3 +119,40 @@ jobs:
 
       - name: Test
         run: pnpm run test
+
+  android-check:
+    name: Android Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: android-app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant Gradle wrapper execute permission
+        run: chmod +x gradlew
+
+      - name: Ktlint Check
+        run: ./gradlew ktlintCheck
+
+      - name: Android Lint
+        run: ./gradlew lintDebug
+
+      - name: Unit Test
+        run: ./gradlew testDebugUnitTest
+
+      - name: Assemble Debug
+        run: ./gradlew assembleDebug
