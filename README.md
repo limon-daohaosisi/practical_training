@@ -238,6 +238,51 @@ cd android-app
 ./gradlew assembleDebug
 ```
 
+Android 端格式检查：
+
+```bash
+cd android-app
+./gradlew ktlintCheck
+```
+
+Android 端自动格式化：
+
+```bash
+cd android-app
+./gradlew ktlintFormat
+```
+
+Android Lint：
+
+```bash
+cd android-app
+./gradlew lintDebug
+```
+
+Android 单元测试：
+
+```bash
+cd android-app
+./gradlew testDebugUnitTest
+```
+
+Android 聚合校验：
+
+```bash
+cd android-app
+./gradlew androidCheck
+```
+
+说明：
+
+- Android 端当前已接入 `ktlint`
+- `androidCheck` 会聚合执行：
+  - `ktlintCheck`
+  - `lintDebug`
+  - `testDebugUnitTest`
+  - `assembleDebug`
+- 如果执行复杂任务或改动多个 Android 文件，建议在交接前运行一次 `./gradlew ktlintFormat`
+
 ## 当前状态
 
 - Android 工程已初始化在 [android-app](/home/daohaosisi/dev/practical_training/android-app)

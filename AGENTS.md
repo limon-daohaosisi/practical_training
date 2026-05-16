@@ -59,7 +59,13 @@
 对于 `android-app/` 改动：
 
 - 默认优先在 Android Studio 中完成 Gradle 同步。
-- 如果命令行校验可行，可在 `android-app/` 下运行 `./gradlew assembleDebug`。
+- 如果命令行校验可行，默认优先运行 `android-app/` 下的 `./gradlew androidCheck`。
+- 如果执行了复杂任务或对多个 Android 文件进行了连续修改，交接前应运行 `./gradlew ktlintFormat`。
+- 如果只需要快速验证某一类问题，可按需运行：
+  - `./gradlew ktlintCheck`
+  - `./gradlew lintDebug`
+  - `./gradlew testDebugUnitTest`
+  - `./gradlew assembleDebug`
 - 如果当前环境不适合做 Android 校验，必须明确说明。
 
 对于 `contracts/` 改动：

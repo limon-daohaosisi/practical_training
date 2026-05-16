@@ -183,6 +183,37 @@ Android 端属于客户端，不是外部协议真源。
 3. 坐标规则统一以屏幕坐标为最终真源
 4. 如果功能还没打通，优先做最小链路验证，不要提前堆太多页面细节
 
+## 校验与格式化
+
+Android 端当前默认使用以下检查命令：
+
+```bash
+cd android-app
+./gradlew ktlintCheck
+./gradlew lintDebug
+./gradlew testDebugUnitTest
+./gradlew assembleDebug
+./gradlew androidCheck
+```
+
+说明：
+
+- `ktlintCheck`：Kotlin 格式检查
+- `ktlintFormat`：Kotlin 自动格式化
+- `lintDebug`：Android Lint
+- `testDebugUnitTest`：Android 单元测试
+- `assembleDebug`：Debug 构建
+- `androidCheck`：当前 Android 端聚合校验入口
+
+默认规则：
+
+1. Android 端改动后，优先运行 `./gradlew androidCheck`
+2. 如果执行了复杂任务或连续修改多个 Android 文件，交接前应运行 `./gradlew ktlintFormat`
+3. 如果当前环境无法完成 Gradle 校验，必须明确说明原因，例如：
+   - JDK 未配置
+   - Gradle 下载失败
+   - Android SDK 或网络环境问题
+
 ## 审查清单
 
 改动 Android 代码后，至少自查：
