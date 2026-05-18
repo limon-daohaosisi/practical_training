@@ -120,6 +120,7 @@ components:
         - contentDescription
         - className
         - clickable
+        - editable
         - enabled
         - bounds
       properties:
@@ -135,6 +136,9 @@ components:
         clickable:
           type: boolean
           description: 节点是否可点击。
+        editable:
+          type: boolean
+          description: 节点是否可编辑，例如输入框。
         enabled:
           type: boolean
           description: 节点当前是否可用。
@@ -174,6 +178,12 @@ components:
           description: 建议动作对应的目标区域；如果无法可靠定位，必须返回 null。
         action:
           $ref: "#/components/schemas/Action"
+        savedMetadataPath:
+          type: string
+          description: server 侧调试用途，metadata.json 在本地临时目录中的保存路径。
+        savedScreenshotPath:
+          type: string
+          description: server 侧调试用途，screenshot.jpg 在本地临时目录中的保存路径。
       description: |
         第一版动作约束：
         - 当 action.type 为 tap 时，target 必须非空

@@ -8,6 +8,14 @@ export function buildApp() {
     logger: true,
   });
 
+  app.addContentTypeParser(
+    /^multipart\/form-data/i,
+    { parseAs: "buffer" },
+    (_request, body, done) => {
+      done(null, body);
+    },
+  );
+
   registerHealthRoutes(app);
   registerAnalyzeRoutes(app);
 

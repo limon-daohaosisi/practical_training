@@ -1,4 +1,4 @@
-package com.example.myapplication.app.service
+package com.example.myapplication.core.accessibility
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
@@ -11,12 +11,19 @@ import android.os.Handler
 import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
-import com.example.myapplication.app.model.CaptureResult
-import com.example.myapplication.app.model.NormalizedBounds
-import com.example.myapplication.app.model.NormalizedNode
+import com.example.myapplication.core.model.CaptureResult
+import com.example.myapplication.core.model.NodeNormalizer
+import com.example.myapplication.core.model.NormalizedBounds
+import com.example.myapplication.core.model.RawNodeSnapshot
+import com.example.myapplication.core.model.ScreenshotCapture
+import com.example.myapplication.core.model.withScreenshot
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -32,7 +39,7 @@ class CaptureAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        val screenshotFlag = 0x00010000  // AccessibilityServiceInfo.FLAG_CAN_TAKE_SCREENSHOT
+        val screenshotFlag = 0x00010000
         val info = AccessibilityServiceInfo().apply {
             eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
                 AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
@@ -57,7 +64,6 @@ class CaptureAccessibilityService : AccessibilityService() {
 
         if (pkg == packageName || pkg.isEmpty()) return
 
-        // Don't capture launcher — it always has a ready root so it steals the capture
         if (isLauncherPackage(pkg)) {
             appendLog("${timeNow()} capture SKIP | pkg=$pkg | reason=launcher")
             return
@@ -88,7 +94,6 @@ class CaptureAccessibilityService : AccessibilityService() {
 
     private fun scheduleCapture(event: AccessibilityEvent) {
         val targetPkg = event.packageName?.toString().orEmpty()
-        // Debounce: skip if same package captured within DEBOUNCE_MS
         if (targetPkg == lastCapturePkg &&
             System.currentTimeMillis() - lastCaptureTime < DEBOUNCE_MS
         ) {
@@ -128,24 +133,14 @@ class CaptureAccessibilityService : AccessibilityService() {
         val sw = disp.widthPixels
         val sh = disp.heightPixels
 
-        // Clear stale screenshot from previous capture
         lastScreenshotPath.value = null
         java.io.File(cacheDir, "captures").listFiles()?.forEach { it.delete() }
 
-        // Fire screenshot BEFORE node traversal — takeScreenshot is async but
-        // the earlier we call it the less likely the screen has changed.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            takeScreenshotFor(pkg, captureSerial)
-        } else {
-            appendLog("${timeNow()} screenshot SKIP | reason=API < 34")
-        }
-
-        val nodes = mutableListOf<NormalizedNode>()
         val rect = Rect()
-        traverse(root, nodes, rect)
+        val snapshot = snapshot(root, rect)
         root.recycle()
 
-        nodes.sortWith(compareBy<NormalizedNode> { it.bounds.top }.thenBy { it.bounds.left })
+        val nodes = NodeNormalizer.normalize(snapshot)
 
         val result = CaptureResult(
             packageName = pkg,
@@ -158,9 +153,45 @@ class CaptureAccessibilityService : AccessibilityService() {
         lastCapturePkg = pkg
         lastCaptureTime = System.currentTimeMillis()
         appendLog("${timeNow()} capture OK | pkg=$pkg | nodes=${nodes.size} | clickable=${nodes.count { it.clickable }} | screen=${sw}x${sh}")
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            takeScreenshotFor(pkg, captureSerial)
+        } else {
+            appendLog("${timeNow()} screenshot SKIP | reason=API < 30")
+        }
     }
 
-    @androidx.annotation.RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    @Suppress("DEPRECATION")
+    private suspend fun captureCurrentWindowNow(): CaptureResult {
+        val root = findRoot() ?: error("No active accessibility root is available.")
+        val disp = resources.displayMetrics
+        val rect = Rect()
+        val currentPkg = root.packageName?.toString().orEmpty()
+        val activityName = root.className?.toString().orEmpty()
+        lastScreenshotPath.value = null
+        java.io.File(cacheDir, "captures").listFiles()?.forEach { it.delete() }
+        val snapshot = snapshot(root, rect)
+        root.recycle()
+        val nodes = NodeNormalizer.normalize(snapshot)
+        val base = CaptureResult(
+            packageName = currentPkg,
+            activityName = activityName,
+            nodes = nodes,
+            screenWidth = disp.widthPixels,
+            screenHeight = disp.heightPixels
+        )
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            error("Explicit screenshot capture requires API 30+.")
+        }
+        val screenshot = takeScreenshotNow(currentPkg)
+        val completed = base.withScreenshot(screenshot)
+        lastCapture.value = completed
+        lastScreenshotPath.value = screenshot.savedPath
+        appendLog("${timeNow()} capture NOW | pkg=$currentPkg | nodes=${nodes.size} | screen=${disp.widthPixels}x${disp.heightPixels} | screenshot=${screenshot.imageWidth}x${screenshot.imageHeight}")
+        return completed
+    }
+
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private fun takeScreenshotFor(targetPkg: String, serial: Int) {
         val wList = windows
         val displayId = if (wList != null && wList.isNotEmpty()) {
@@ -180,32 +211,23 @@ class CaptureAccessibilityService : AccessibilityService() {
                     override fun onSuccess(result: ScreenshotResult) {
                         val buffer = result.hardwareBuffer
                         try {
-                            // Stale — a newer capture has already started
                             if (captureSerial != serial) {
                                 appendLog("${timeNow()} screenshot DROP | reason=stale serial=$serial current=$captureSerial")
                                 return
                             }
-                            // User switched away — screenshot shows wrong app
                             val currentPkg = rootInActiveWindow?.packageName?.toString().orEmpty()
                             if (currentPkg.isNotEmpty() && currentPkg != targetPkg && currentPkg != packageName) {
                                 appendLog("${timeNow()} screenshot DROP | reason=switched expected=$targetPkg actual=$currentPkg")
                                 return
                             }
-                            if (buffer == null) return
                             val bitmap = Bitmap.wrapHardwareBuffer(buffer, null)
                             if (bitmap != null) {
-                                val stream = ByteArrayOutputStream()
-                                bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
-                                val bytes = stream.toByteArray()
+                                val screenshot = bitmap.toScreenshotCapture(targetPkg)
                                 val current = lastCapture.value
                                 if (current != null && current.packageName == targetPkg) {
-                                    lastCapture.value = current.copy(
-                                        screenshotBytes = bytes,
-                                        imageWidth = bitmap.width,
-                                        imageHeight = bitmap.height
-                                    )
-                                    val file = saveScreenshotFile(bytes, targetPkg)
-                                    appendLog("${timeNow()} screenshot OK | ${bitmap.width}x${bitmap.height} | ${bytes.size / 1024}KB | $file")
+                                    lastCapture.value = current.withScreenshot(screenshot)
+                                    lastScreenshotPath.value = screenshot.savedPath
+                                    appendLog("${timeNow()} screenshot OK | ${screenshot.imageWidth}x${screenshot.imageHeight} | ${screenshot.bytes.size / 1024}KB | ${screenshot.savedPath}")
                                 } else {
                                     appendLog("${timeNow()} screenshot DROP | pkg mismatch expected=$targetPkg actual=${current?.packageName}")
                                 }
@@ -226,19 +248,58 @@ class CaptureAccessibilityService : AccessibilityService() {
         }
     }
 
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
+    private suspend fun takeScreenshotNow(targetPkg: String): ScreenshotCapture {
+        val deferred = CompletableDeferred<ScreenshotCapture>()
+        val wList = windows
+        val displayId = if (wList != null && wList.isNotEmpty()) {
+            val id = wList[0].displayId
+            wList.forEach { it.recycle() }
+            id
+        } else {
+            0
+        }
+        takeScreenshot(
+            displayId,
+            mainExecutor,
+            object : TakeScreenshotCallback {
+                override fun onSuccess(result: ScreenshotResult) {
+                    val buffer = result.hardwareBuffer
+                    try {
+                        val bitmap = Bitmap.wrapHardwareBuffer(buffer, null)
+                        if (bitmap == null) {
+                            deferred.completeExceptionally(
+                                IllegalStateException("Failed to decode screenshot bitmap.")
+                            )
+                            return
+                        }
+                        deferred.complete(bitmap.toScreenshotCapture(targetPkg))
+                        bitmap.recycle()
+                    } finally {
+                        buffer?.close()
+                    }
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    deferred.completeExceptionally(
+                        IllegalStateException("Screenshot failed with code=$errorCode")
+                    )
+                }
+            }
+        )
+        return deferred.await()
+    }
+
     @Suppress("DEPRECATION")
     private fun findRoot(): AccessibilityNodeInfo? {
-        // 1. rootInActiveWindow
         rootInActiveWindow?.let { return it }
 
-        // 2. Window list — find active window root
         val wList = windows
         if (wList != null) {
             for (w in wList) {
                 if (w.isActive) {
                     val r = w.root
                     if (r != null) {
-                        // Recycle all windows — root retains the node tree
                         wList.forEach { it.recycle() }
                         return r
                     }
@@ -250,44 +311,32 @@ class CaptureAccessibilityService : AccessibilityService() {
     }
 
     @Suppress("DEPRECATION")
-    private fun traverse(
+    private fun snapshot(
         node: AccessibilityNodeInfo,
-        out: MutableList<NormalizedNode>,
-        rect: Rect,
-        ancestorClickable: Boolean = false
-    ) {
+        rect: Rect
+    ): RawNodeSnapshot {
         node.getBoundsInScreen(rect)
-        var isInteractive = node.isClickable || node.isFocusable || node.isLongClickable
-        // Inherit clickability from parent: if an ancestor is clickable,
-        // text-bearing descendants should be reported as interactive.
-        if (ancestorClickable && !isInteractive) {
-            val hasText = !node.text.isNullOrEmpty() ||
-                !node.contentDescription.isNullOrEmpty()
-            if (hasText) isInteractive = true
+        val bounds = NormalizedBounds(rect.left, rect.top, rect.right, rect.bottom)
+        val children = mutableListOf<RawNodeSnapshot>()
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            children += snapshot(child, rect)
+            child.recycle()
         }
-        val parentClickable = ancestorClickable || node.isClickable
-
-        val normalized = NormalizedNode(
+        return RawNodeSnapshot(
             text = node.text?.toString().orEmpty(),
             contentDescription = node.contentDescription?.toString().orEmpty(),
             className = node.className?.toString().orEmpty(),
             clickable = node.isClickable,
+            editable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
+                node.isEditable
+            } else {
+                false
+            },
             enabled = node.isEnabled,
-            bounds = NormalizedBounds(rect.left, rect.top, rect.right, rect.bottom)
+            bounds = bounds,
+            children = children
         )
-
-        if (normalized.text.isNotEmpty() ||
-            normalized.contentDescription.isNotEmpty() ||
-            isInteractive
-        ) {
-            out.add(normalized.copy(clickable = isInteractive))
-        }
-
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            traverse(child, out, rect, parentClickable)
-            child.recycle()
-        }
     }
 
     private fun saveScreenshotFile(bytes: ByteArray, targetPkg: String): String {
@@ -300,6 +349,19 @@ class CaptureAccessibilityService : AccessibilityService() {
         return file.absolutePath
     }
 
+    private fun Bitmap.toScreenshotCapture(targetPkg: String): ScreenshotCapture {
+        val stream = ByteArrayOutputStream()
+        compress(Bitmap.CompressFormat.JPEG, 80, stream)
+        val bytes = stream.toByteArray()
+        val file = saveScreenshotFile(bytes, targetPkg)
+        return ScreenshotCapture(
+            bytes = bytes,
+            imageWidth = width,
+            imageHeight = height,
+            savedPath = file
+        )
+    }
+
     private fun appendLog(line: String) {
         val current = eventLog.value
         eventLog.value = (current + line).takeLast(MAX_LOG_LINES)
@@ -307,9 +369,9 @@ class CaptureAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val MAX_LOG_LINES = 50
-        private const val MAX_RETRIES = 2       // 3 total attempts: 0ms, 150ms, 300ms
+        private const val MAX_RETRIES = 2
         private const val RETRY_DELAY_MS = 150L
-        private const val DEBOUNCE_MS = 800L   // Ignore same-pkg events within 800ms
+        private const val DEBOUNCE_MS = 800L
         private val dateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
         private val eventLog = MutableStateFlow<List<String>>(emptyList())
@@ -321,6 +383,33 @@ class CaptureAccessibilityService : AccessibilityService() {
         private val lastScreenshotPath = MutableStateFlow<String?>(null)
         val screenshotPath: StateFlow<String?> = lastScreenshotPath.asStateFlow()
 
+        @Volatile
+        private var activeService: CaptureAccessibilityService? = null
+
         private fun timeNow(): String = dateFormat.format(Date())
+
+        suspend fun captureNow(): CaptureResult {
+            val service = activeService ?: error("Accessibility service is not connected.")
+            val deferred = CompletableDeferred<CaptureResult>()
+            service.handler.post {
+                CoroutineScope(Dispatchers.Main.immediate).launch {
+                    runCatching {
+                        service.captureCurrentWindowNow()
+                    }.onSuccess(deferred::complete)
+                        .onFailure(deferred::completeExceptionally)
+                }
+            }
+            return deferred.await()
+        }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        activeService = this
+    }
+
+    override fun onUnbind(intent: android.content.Intent?): Boolean {
+        if (activeService === this) activeService = null
+        return super.onUnbind(intent)
     }
 }

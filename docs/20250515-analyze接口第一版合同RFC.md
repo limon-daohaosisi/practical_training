@@ -198,8 +198,9 @@
 2. `contentDescription`
 3. `className`
 4. `clickable`
-5. `enabled`
-6. `bounds`
+5. `editable`
+6. `enabled`
+7. `bounds`
 
 这里的含义不是“Android 原始无障碍节点天然就完整具备这些值”，而是：
 
@@ -234,6 +235,13 @@ Android 客户端在读取原始 `AccessibilityNodeInfo` 后，需要将其归�
 - 是否必须包含该 key：是
 - 含义：该节点是否可点击
 
+#### `editable`
+
+- 类型：`boolean`
+- 是否必须包含该 key：是
+- 含义：该节点是否可编辑，例如输入框
+- 备注：第一版外部合同不透出 `focusable`
+
 #### `enabled`
 
 - 类型：`boolean`
@@ -261,8 +269,28 @@ Android 客户端在读取原始 `AccessibilityNodeInfo` 后，需要将其归�
 - `contentDescription` 可以为空字符串
 - `className` 可以为空字符串
 - `clickable` 必须存在
+- `editable` 必须存在
 - `enabled` 必须存在
 - `bounds` 必须存在
+
+### 7.4 父可点节点的标签增强规则
+
+第一版允许 Android 客户端对以下场景做最小增强：
+
+1. 父节点可点击
+2. 子节点自身带有 `text` 或 `contentDescription`
+3. 真实可点击区域应以父节点为准
+
+此时客户端可以：
+
+1. 使用子节点的标签信息补全目标文本
+2. 使用父节点的 `bounds` 作为最终上传区域
+3. 如果多个子节点对应同一个父 `bounds`，可以合并为一个节点，并对标签做去重合并
+
+约束：
+
+1. `clickable` 只表示真实可点击语义，不再用 `focusable` 或 `longClickable` 兜底
+2. 合并后节点的 `bounds` 仍必须属于屏幕坐标空间
 
 ## 8. `POST /analyze` 成功响应字段
 
@@ -271,6 +299,8 @@ Android 客户端在读取原始 `AccessibilityNodeInfo` 后，需要将其归�
 1. `answer`
 2. `target`
 3. `action`
+4. `savedMetadataPath`
+5. `savedScreenshotPath`
 
 ### 8.1 `answer`
 
@@ -338,6 +368,20 @@ Android 客户端在读取原始 `AccessibilityNodeInfo` 后，需要将其归�
 1. 当 `action.type = tap` 时，`target` 必须非空
 2. 当 `action.type = scroll` 时，`target` 可以为空
 3. 当 `action.type = none` 时，`target` 必须为 `null`
+
+### 8.5 调试落盘路径
+
+为便于 MVP 联调，第一版 server 可以在本地临时目录中保存：
+
+1. `metadata.json`
+2. `screenshot.jpg`
+
+对应响应中可返回：
+
+1. `savedMetadataPath`
+2. `savedScreenshotPath`
+
+这两个字段仅用于本地调试和联调观察，不代表长期正式存储方案。
 
 ## 9. 错误响应字段
 
