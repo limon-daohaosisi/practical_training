@@ -6,7 +6,6 @@ import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -215,7 +214,7 @@ fun CaptureResultView(result: CaptureResult, screenshotPath: String? = null) {
                 color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
             )
             Text(
-                text = result.className,
+                text = result.activityName,
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace
             )
@@ -239,6 +238,13 @@ fun CaptureResultView(result: CaptureResult, screenshotPath: String? = null) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
             )
+            if (result.screenWidth > 0 && result.imageWidth != result.screenWidth) {
+                Text(
+                    text = "缩放: x${"%.2f".format(result.scaleX)} / y${"%.2f".format(result.scaleY)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
             if (screenshotPath != null) {
                 Text(
                     text = "文件: $screenshotPath",

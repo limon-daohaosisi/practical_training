@@ -149,7 +149,7 @@ class CaptureAccessibilityService : AccessibilityService() {
 
         val result = CaptureResult(
             packageName = pkg,
-            className = event.className?.toString().orEmpty(),
+            activityName = event.className?.toString().orEmpty(),
             nodes = nodes,
             screenWidth = sw,
             screenHeight = sh
@@ -178,32 +178,42 @@ class CaptureAccessibilityService : AccessibilityService() {
                 mainExecutor,
                 object : TakeScreenshotCallback {
                     override fun onSuccess(result: ScreenshotResult) {
-                        // Stale — a newer capture has already started
-                        if (captureSerial != serial) {
-                            appendLog("${timeNow()} screenshot DROP | reason=stale serial=$serial current=$captureSerial")
-                            return
-                        }
                         val buffer = result.hardwareBuffer
-                        val bitmap = Bitmap.wrapHardwareBuffer(buffer, null)
-                        if (bitmap != null) {
-                            val stream = ByteArrayOutputStream()
-                            bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
-                            val bytes = stream.toByteArray()
-                            val current = lastCapture.value
-                            if (current != null && current.packageName == targetPkg) {
-                                lastCapture.value = current.copy(
-                                    screenshotBytes = bytes,
-                                    imageWidth = bitmap.width,
-                                    imageHeight = bitmap.height
-                                )
-                                val file = saveScreenshotFile(bytes, targetPkg)
-                                appendLog("${timeNow()} screenshot OK | ${bitmap.width}x${bitmap.height} | ${bytes.size / 1024}KB | $file")
-                            } else {
-                                appendLog("${timeNow()} screenshot DROP | pkg mismatch expected=$targetPkg actual=${current?.packageName}")
+                        try {
+                            // Stale — a newer capture has already started
+                            if (captureSerial != serial) {
+                                appendLog("${timeNow()} screenshot DROP | reason=stale serial=$serial current=$captureSerial")
+                                return
                             }
-                            bitmap.recycle()
+                            // User switched away — screenshot shows wrong app
+                            val currentPkg = rootInActiveWindow?.packageName?.toString().orEmpty()
+                            if (currentPkg.isNotEmpty() && currentPkg != targetPkg && currentPkg != packageName) {
+                                appendLog("${timeNow()} screenshot DROP | reason=switched expected=$targetPkg actual=$currentPkg")
+                                return
+                            }
+                            if (buffer == null) return
+                            val bitmap = Bitmap.wrapHardwareBuffer(buffer, null)
+                            if (bitmap != null) {
+                                val stream = ByteArrayOutputStream()
+                                bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
+                                val bytes = stream.toByteArray()
+                                val current = lastCapture.value
+                                if (current != null && current.packageName == targetPkg) {
+                                    lastCapture.value = current.copy(
+                                        screenshotBytes = bytes,
+                                        imageWidth = bitmap.width,
+                                        imageHeight = bitmap.height
+                                    )
+                                    val file = saveScreenshotFile(bytes, targetPkg)
+                                    appendLog("${timeNow()} screenshot OK | ${bitmap.width}x${bitmap.height} | ${bytes.size / 1024}KB | $file")
+                                } else {
+                                    appendLog("${timeNow()} screenshot DROP | pkg mismatch expected=$targetPkg actual=${current?.packageName}")
+                                }
+                                bitmap.recycle()
+                            }
+                        } finally {
+                            buffer?.close()
                         }
-                        buffer.close()
                     }
 
                     override fun onFailure(errorCode: Int) {
@@ -228,8 +238,8 @@ class CaptureAccessibilityService : AccessibilityService() {
                 if (w.isActive) {
                     val r = w.root
                     if (r != null) {
-                        // Recycle other windows
-                        wList.filter { it != w }.forEach { it.recycle() }
+                        // Recycle all windows — root retains the node tree
+                        wList.forEach { it.recycle() }
                         return r
                     }
                 }
