@@ -13,6 +13,7 @@ type PersistAnalyzeDebugPayloadInput = {
 export type PersistAnalyzeDebugPayloadResult = {
   metadataJson: string;
   screenshotBytes: Buffer;
+  screenshotMimeType: string;
   savedMetadataPath: string;
   savedScreenshotPath: string;
 };
@@ -21,10 +22,8 @@ export async function persistAnalyzeDebugPayload(
   input: PersistAnalyzeDebugPayloadInput,
 ): Promise<PersistAnalyzeDebugPayloadResult> {
   const boundary = extractBoundary(input.contentType);
-  const { metadataJson, screenshotBytes } = parseMultipartPayload(
-    input.body,
-    boundary,
-  );
+  const { metadataJson, screenshotBytes, screenshotMimeType } =
+    parseMultipartPayload(input.body, boundary);
   const parsedMetadata = JSON.parse(metadataJson) as {
     screenWidth: number;
     screenHeight: number;
@@ -57,6 +56,7 @@ export async function persistAnalyzeDebugPayload(
   return {
     metadataJson,
     screenshotBytes,
+    screenshotMimeType,
     savedMetadataPath,
     savedScreenshotPath,
   };
@@ -76,6 +76,7 @@ function parseMultipartPayload(
 ): {
   metadataJson: string;
   screenshotBytes: Buffer;
+  screenshotMimeType: string;
 } {
   const delimiter = Buffer.from(`--${boundary}`);
   const parts = splitBuffer(body, delimiter)
@@ -84,6 +85,7 @@ function parseMultipartPayload(
 
   let metadataJson: string | null = null;
   let screenshotBytes: Buffer | null = null;
+  let screenshotMimeType: string | null = null;
 
   for (const part of parts) {
     const separator = Buffer.from("\r\n\r\n");
@@ -102,6 +104,12 @@ function parseMultipartPayload(
 
     if (rawHeaders.includes('name="screenshot"')) {
       screenshotBytes = rawContent;
+      screenshotMimeType =
+        rawHeaders
+          .split("\r\n")
+          .find((header) => header.toLowerCase().startsWith("content-type:"))
+          ?.split(":")[1]
+          ?.trim() ?? "application/octet-stream";
     }
   }
 
@@ -112,6 +120,7 @@ function parseMultipartPayload(
   return {
     metadataJson,
     screenshotBytes,
+    screenshotMimeType: screenshotMimeType ?? "application/octet-stream",
   };
 }
 

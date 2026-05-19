@@ -1,0 +1,79 @@
+openapi: 3.1.0
+info:
+  title: 引导助手 Conversations 接口
+  version: 0.1.0
+  description: Android 客户端控制引导会话生命周期的 MVP 外部合同。
+
+paths:
+  /conversations/{conversationId}/cancel:
+    post:
+      summary: 显式结束当前引导会话。
+      operationId: cancelConversation
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelConversationRequest"
+      responses:
+        "200":
+          description: 成功结束会话
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CancelConversationResponse"
+        "400":
+          description: 请求不合法
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    CancelConversationRequest:
+      type: object
+      required:
+        - deviceId
+      properties:
+        deviceId:
+          type: string
+          description: 发起取消动作的 Android 设备或安装实例标识。
+    CancelConversationResponse:
+      type: object
+      required:
+        - conversationId
+        - status
+        - closedReason
+      properties:
+        conversationId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+            - cancelled
+        closedReason:
+          type: string
+          enum:
+            - user_exit
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          enum:
+            - INVALID_REQUEST
+            - INTERNAL_ERROR
+        message:
+          type: string

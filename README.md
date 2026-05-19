@@ -155,6 +155,7 @@ practical_training/
 
 - `Node.js 20+`
 - `pnpm`
+- `PostgreSQL`
 
 安装命令：
 
@@ -169,6 +170,70 @@ pnpm install
 cd server
 pnpm run dev
 ```
+
+### 1.1 Server 数据库使用
+
+Server 当前使用：
+
+- `PostgreSQL`
+- `Drizzle ORM`
+- `drizzle.config.ts`
+- `server/src/db/schema/` 作为 schema 真源
+
+初始化前请先准备数据库，并设置环境变量：
+
+```bash
+cd server
+export DATABASE_URL="postgres://user:password@127.0.0.1:5432/practical_training"
+```
+
+说明：
+
+- `DATABASE_URL` 是当前 Drizzle 配置和数据库 client 的必要环境变量
+- 未设置 `DATABASE_URL` 时，`db:generate`、`db:migrate` 和运行时数据库初始化都会失败
+
+当前数据库相关目录：
+
+```text
+server/
+  drizzle.config.ts
+  drizzle/
+    migrations/
+  src/
+    db/
+      client.ts
+      schema/
+```
+
+常用命令：
+
+生成 migration：
+
+```bash
+cd server
+DATABASE_URL="postgres://user:password@127.0.0.1:5432/practical_training" pnpm run db:generate
+```
+
+执行 migration：
+
+```bash
+cd server
+DATABASE_URL="postgres://user:password@127.0.0.1:5432/practical_training" pnpm run db:migrate
+```
+
+建议开发顺序：
+
+1. 先修改 `server/src/db/schema/`
+2. 再生成 migration
+3. 再执行 migration
+4. 最后修改依赖这些表的 route / service / transaction 逻辑
+
+当前 MVP 阶段的数据库约束：
+
+- 正式真源在 `server/src/db/schema/`
+- migration 文件必须提交到仓库
+- 不要手工改库后不补回 schema 和 migration
+- 截图不作为正式数据库真源，只在单次 run 内存中使用
 
 类型检查：
 
@@ -215,9 +280,9 @@ pnpm run check
 说明：
 
 - `server/package.json` 已包含第一版基础依赖
-- 当前只包含最小 Fastify 骨架
+- 当前已包含 Fastify 骨架与 PostgreSQL/Drizzle 基础设施
 - 当前 server 已包含 `typecheck`、`ESLint`、`Prettier`、`Vitest` 基础校验
-- 后续接入 OpenAI、schema 校验等能力时，再继续补充依赖和测试
+- 后续接入 OpenAI、更多 transaction 与 query 层能力时，再继续补充依赖和测试
 
 ### 2. Android 依赖安装
 

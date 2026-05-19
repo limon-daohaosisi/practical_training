@@ -55,6 +55,8 @@
 - 默认优先运行 `server/` 下的 `pnpm run check` 作为完整基础校验。
 - 如果只需要快速验证类型，可先运行 `pnpm run typecheck`。
 - 如果后续添加了测试，尽量运行与改动相关的 server 测试。
+- 如果改动了数据库 schema、migration 或事务逻辑，额外检查 `server/drizzle.config.ts`、`server/drizzle/migrations/` 与 `server/src/db/schema/` 是否保持一致。
+- 如果改动涉及数据库接入，默认假设需要 `DATABASE_URL`，交接时应说明本次是否实际执行了 migration。
 
 对于 `android-app/` 改动：
 
@@ -78,6 +80,7 @@
 - 不要把 server 业务逻辑放进 `contracts/`
 - 不要把外部 API 合同真源放进 Android 私有文件或 server 私有文件
 - 不要把 `node_modules/`、构建产物、生成文件当作源码修改
+- 不要手工修改数据库后只改 migration 或只改 schema，二者必须和实际数据库结构保持一致
 
 ## 改动风格
 
@@ -93,3 +96,10 @@
 1. 先判断这次改动是 contract-first、server-first 还是 Android-first。
 2. 如果外部 API 有变化，优先更新 `contracts/openapi/`，或与实现放在同一次改动中完成。
 3. 如果某一侧被阻塞，优先使用 mock 数据或占位响应解耦，而不是原地等待。
+
+当改动涉及 `server` 数据库时：
+
+1. 先改 `server/src/db/schema/` 作为逻辑真源。
+2. 再生成或更新 `server/drizzle/migrations/`。
+3. 再修改依赖这些表的 route / service / transaction 逻辑。
+4. 如果本次没有实际执行 migration，交接时必须明确说明。

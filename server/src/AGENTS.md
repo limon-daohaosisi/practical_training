@@ -110,6 +110,19 @@ services 应比 route handler 更容易单独测试。
 
 plugins 提供的是基础设施，不应承载业务决策。
 
+### `db/`
+
+- `db/client.ts` 负责数据库连接与 Drizzle client 初始化
+- `db/schema/` 负责数据库 schema 真源
+- `db/queries/` 负责轻量查询封装
+- `db/transactions/` 负责需要原子性的会话与运行写路径
+
+数据库相关代码应遵守：
+
+- 先改 `schema/`，再改 migration，再改依赖这些表的业务逻辑
+- 不要把复杂业务决策塞进 `client.ts`
+- 不要在 route handler 中直接散写数据库状态机逻辑
+
 ### `utils/`
 
 - 只放小型、通用、无状态 helper
@@ -164,5 +177,18 @@ pnpm run typecheck
 pnpm run lint
 pnpm run test
 ```
+
+如果修改了数据库 schema 或 migration，还应优先检查：
+
+```bash
+cd server
+DATABASE_URL="postgres://user:password@127.0.0.1:5432/practical_training" pnpm run db:generate
+DATABASE_URL="postgres://user:password@127.0.0.1:5432/practical_training" pnpm run db:migrate
+```
+
+说明：
+
+- `DATABASE_URL` 是数据库命令和运行时数据库初始化的必要环境变量
+- 如果当前环境没有数据库，最终交接时必须说明 migration 未实际执行
 
 如果当前无法做校验，最终交接时必须明确说明。
