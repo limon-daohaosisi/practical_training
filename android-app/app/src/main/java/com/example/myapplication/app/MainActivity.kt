@@ -1,47 +1,50 @@
 package com.example.myapplication.app
 
+import android.content.Context
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.runtime.mutableStateOf
 import com.example.myapplication.app.theme.MyApplicationTheme
+import com.example.myapplication.feature.session.SessionDebugScreen
 
 class MainActivity : ComponentActivity() {
+
+    private val accessibilityEnabledState = mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        refreshAccessibilityState()
         setContent {
             MyApplicationTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android",
-                        modifier = Modifier.padding(innerPadding)
-                    )
-                }
+                SessionDebugScreen(
+                    context = this,
+                    isAccessibilityEnabled = accessibilityEnabledState
+                )
             }
         }
     }
-}
 
-@Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
-}
-
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-    MyApplicationTheme {
-        Greeting("Android")
+    override fun onResume() {
+        super.onResume()
+        refreshAccessibilityState()
     }
+
+    private fun refreshAccessibilityState() {
+        accessibilityEnabledState.value = isAccessibilityEnabled(this)
+    }
+}
+
+private fun isAccessibilityEnabled(context: Context): Boolean {
+    val serviceName = "${context.packageName}/${context.packageName}.core.accessibility.CaptureAccessibilityService"
+    val enabledServices = try {
+        Settings.Secure.getString(
+            context.contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        )
+    } catch (_: Exception) {
+        null
+    }
+    return enabledServices?.contains(serviceName) == true
 }

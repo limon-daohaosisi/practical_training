@@ -1,0 +1,56 @@
+{
+  "question": "这个页面有什么内容？",
+  "packageName": "com.google.android.youtube",
+  "activityName": "com.google.android.apps.youtube.app.WatchWhileActivity",
+  "screenWidth": 1080,
+  "screenHeight": 2400,
+  "imageWidth": 1080,
+  "imageHeight": 2400,
+  "nodes": [
+    {
+      "text": "搜索",
+      "contentDescription": "",
+      "className": "android.widget.ImageButton",
+      "clickable": true,
+      "editable": false,
+      "enabled": true,
+      "bounds": { "left": 840, "top": 108, "right": 960, "bottom": 228 }
+    },
+    {
+      "text": "Flutter 3.29 更新内容",
+      "contentDescription": "Flutter 3.29 更新内容 12分钟",
+      "className": "android.view.View",
+      "clickable": true,
+      "editable": false,
+      "enabled": true,
+      "bounds": { "left": 0, "top": 900, "right": 1080, "bottom": 1200 }
+    },
+    {
+      "text": "Kotlin 2.0 迁移指南",
+      "contentDescription": "Kotlin 2.0 迁移指南 8分钟",
+      "className": "android.view.View",
+      "clickable": true,
+      "editable": false,
+      "enabled": true,
+      "bounds": { "left": 0, "top": 1210, "right": 1080, "bottom": 1510 }
+    },
+    {
+      "text": "首页",
+      "contentDescription": "首页",
+      "className": "android.widget.TextView",
+      "clickable": true,
+      "editable": false,
+      "enabled": true,
+      "bounds": { "left": 0, "top": 2280, "right": 270, "bottom": 2400 }
+    },
+    {
+      "text": "Shorts",
+      "contentDescription": "Shorts",
+      "className": "android.widget.TextView",
+      "clickable": true,
+      "editable": false,
+      "enabled": true,
+      "bounds": { "left": 270, "top": 2280, "right": 540, "bottom": 2400 }
+    }
+  ]
+}

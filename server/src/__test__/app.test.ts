@@ -27,7 +27,7 @@ describe("buildApp", () => {
     });
   });
 
-  it("returns analyze placeholder response", async () => {
+  it("rejects incomplete analyze requests", async () => {
     app = buildApp();
 
     const response = await app.inject({
@@ -35,10 +35,10 @@ describe("buildApp", () => {
       url: "/analyze",
     });
 
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({
-      status: "not_implemented",
-      message: "Analyze pipeline has not been implemented yet.",
+      code: "INVALID_REQUEST",
+      message: "metadata and screenshot are required.",
     });
   });
 });
