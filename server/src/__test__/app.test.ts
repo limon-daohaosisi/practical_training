@@ -41,4 +41,24 @@ describe("buildApp", () => {
       message: "metadata and screenshot are required.",
     });
   });
+
+  it("accepts cancel route", async () => {
+    app = buildApp();
+    const conversationId = "11111111-1111-4111-8111-111111111111";
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/conversations/${conversationId}/cancel`,
+      payload: {
+        deviceId: "device-001",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      conversationId,
+      status: "cancelled",
+      closedReason: "user_exit",
+    });
+  });
 });

@@ -2,12 +2,12 @@ openapi: 3.1.0
 info:
   title: 引导助手 Analyze 接口
   version: 0.1.0
-  description: Android 客户端请求屏幕引导分析的第一版外部合同。
+  description: Android 客户端请求多轮引导分析的 MVP 外部合同。
 
 paths:
   /analyze:
     post:
-      summary: 分析当前屏幕并返回引导结果。
+      summary: 提交一次引导事件并返回当前步骤结果。
       operationId: analyzeScreen
       requestBody:
         required: true
@@ -31,7 +31,7 @@ paths:
                   description: 当前页面截图文件，推荐使用 JPEG。
       responses:
         "200":
-          description: 成功分析并返回结果
+          description: 成功处理本次事件并返回当前引导结果
           content:
             application/json:
               schema:
@@ -69,13 +69,14 @@ paths:
                   value:
                     code: INTERNAL_ERROR
                     message: 发生未预期的内部错误。
-
 components:
   schemas:
     AnalyzeMetadata:
       type: object
       required:
-        - question
+        - deviceId
+        - messageType
+        - messageText
         - packageName
         - screenWidth
         - screenHeight
@@ -83,9 +84,31 @@ components:
         - imageHeight
         - nodes
       properties:
-        question:
+        deviceId:
           type: string
-          description: 用户针对当前页面提出的问题。
+          description: Android 设备或安装实例标识。
+        conversationId:
+          type: string
+          format: uuid
+          description: |
+            当前续跑要归属的会话 ID。
+            - `speech_text` 首轮可不传
+            - `observed_click` / `observed_scroll` 续跑时建议传
+        messageType:
+          type: string
+          enum:
+            - speech_text
+            - observed_click
+            - observed_scroll
+          description: 本次事件类型。
+        messageText:
+          oneOf:
+            - type: string
+            - type: "null"
+          description: |
+            本次事件的文本内容。
+            - `speech_text` 时应传语音转写文本
+            - `observed_click` / `observed_scroll` 时固定传 null
         packageName:
           type: string
           description: 当前页面所属 Android 包名。
@@ -164,10 +187,28 @@ components:
     AnalyzeSuccessResponse:
       type: object
       required:
+        - conversationId
+        - runId
+        - conversationStatus
         - answer
         - target
         - action
       properties:
+        conversationId:
+          type: string
+          format: uuid
+          description: 当前步骤归属的会话 ID。
+        runId:
+          type: string
+          format: uuid
+          description: 当前这一次短运行的 ID。
+        conversationStatus:
+          type: string
+          enum:
+            - waiting_interaction
+            - completed
+            - failed
+          description: 当前会话在本次返回后的状态。
         answer:
           type: string
           description: 用于展示和播报给用户的主回答。
@@ -185,7 +226,7 @@ components:
           type: string
           description: server 侧调试用途，screenshot.jpg 在本地临时目录中的保存路径。
       description: |
-        第一版动作约束：
+        MVP 动作约束：
         - 当 action.type 为 tap 时，target 必须非空
         - 当 action.type 为 scroll 时，target 可以为空
         - 当 action.type 为 none 时，target 必须为 null
