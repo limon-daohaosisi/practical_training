@@ -40,7 +40,12 @@ class AnalyzeContractTest {
             capture = capture,
         )
 
-        val json = JSONObject(metadata.toJson())
+        val json =
+            JSONObject(
+                with(AnalyzeJson) {
+                    metadata.toJson()
+                },
+            )
 
         assertEquals("device-001", json.getString("deviceId"))
         assertEquals("speech_text", json.getString("messageType"))
