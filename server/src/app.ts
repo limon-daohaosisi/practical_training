@@ -2,12 +2,14 @@ import Fastify from "fastify";
 
 import type { AgentRunner } from "./agents/agent-runner.js";
 import { mockAgentRunner } from "./agents/mock-agent-runner.js";
+import type { DbClient } from "./db/client.js";
 import { registerAnalyzeRoutes } from "./routes/analyze/analyze.route.js";
 import { registerCancelRoutes } from "./routes/cancel/cancel.route.js";
 import { registerHealthRoutes } from "./routes/health/health.route.js";
 
 type BuildAppOptions = {
   agentRunner?: AgentRunner;
+  dbClient?: DbClient;
 };
 
 export function buildApp(options: BuildAppOptions = {}) {
@@ -25,8 +27,8 @@ export function buildApp(options: BuildAppOptions = {}) {
   );
 
   registerHealthRoutes(app);
-  registerAnalyzeRoutes(app, agentRunner);
-  registerCancelRoutes(app);
+  registerAnalyzeRoutes(app, agentRunner, options.dbClient);
+  registerCancelRoutes(app, options.dbClient);
 
   return app;
 }

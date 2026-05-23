@@ -1,7 +1,14 @@
 import type { FastifyInstance } from "fastify";
 
-import { cancelHandler } from "./cancel.handler.js";
+import type { DbClient } from "../../db/client.js";
+import { createCancelHandler } from "./cancel.handler.js";
 
-export function registerCancelRoutes(app: FastifyInstance) {
-  app.post("/conversations/:conversationId/cancel", cancelHandler);
+export function registerCancelRoutes(
+  app: FastifyInstance,
+  dbClient?: DbClient,
+) {
+  app.post(
+    "/conversations/:conversationId/cancel",
+    createCancelHandler(dbClient),
+  );
 }
