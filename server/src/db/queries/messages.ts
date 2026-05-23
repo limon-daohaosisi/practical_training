@@ -70,9 +70,7 @@ export async function getConversationGoal(
   const [row] = await db
     .select({ text: messages.text })
     .from(messages)
-    .where(
-      eq(messages.conversationId, conversationId),
-    )
+    .where(eq(messages.conversationId, conversationId))
     .orderBy(asc(messages.createdAt))
     .limit(1);
 

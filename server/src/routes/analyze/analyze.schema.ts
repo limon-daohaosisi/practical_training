@@ -8,13 +8,7 @@ export const boundsSchema = z.object({
 });
 
 export const analyzeErrorSchema = z.object({
-  code: z.enum([
-    "INVALID_REQUEST",
-    "DEVICE_BUSY",
-    "INVALID_STATE",
-    "ANALYSIS_FAILED",
-    "INTERNAL_ERROR",
-  ]),
+  code: z.enum(["INVALID_REQUEST", "ANALYSIS_FAILED", "INTERNAL_ERROR"]),
   message: z.string(),
 });
 

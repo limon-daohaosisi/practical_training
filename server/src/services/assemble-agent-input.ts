@@ -1,8 +1,11 @@
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 
 import type { AgentRunInput } from "../agents/agent-runner.js";
-import * as schema from "../db/schema/index.js";
-import { getConversationGoal, getRecentMessagesByConversation } from "../db/queries/messages.js";
+import type * as schema from "../db/schema/index.js";
+import {
+  getConversationGoal,
+  getRecentMessagesByConversation,
+} from "../db/queries/messages.js";
 import type { AnalyzeMetadata } from "../routes/analyze/analyze.schema.js";
 
 type Database = NodePgDatabase<typeof schema>;

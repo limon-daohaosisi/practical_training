@@ -16,6 +16,7 @@ import type { DbClient } from "../db/client.js";
 const {
   ConversationNotFoundError,
   InvalidConversationStateError,
+  DeviceBusyError,
 } = vi.hoisted(() => {
   class ConversationNotFoundError extends Error {
     constructor(conversationId: string) {
@@ -33,7 +34,18 @@ const {
     }
   }
 
-  return { ConversationNotFoundError, InvalidConversationStateError };
+  class DeviceBusyError extends Error {
+    constructor(deviceId: string) {
+      super(`Device ${deviceId} already has an active analysis in progress.`);
+      this.name = "DeviceBusyError";
+    }
+  }
+
+  return {
+    ConversationNotFoundError,
+    InvalidConversationStateError,
+    DeviceBusyError,
+  };
 });
 
 const mockGetConversationGoal = vi.fn().mockResolvedValue("初始目标");
@@ -61,13 +73,13 @@ vi.mock("../db/queries/conversations.js", () => ({
 vi.mock("../db/queries/messages.js", () => ({
   getRecentMessagesByConversation: (...args: unknown[]) =>
     mockGetRecentMessages(...args),
-  getConversationGoal: (...args: unknown[]) =>
-    mockGetConversationGoal(...args),
+  getConversationGoal: (...args: unknown[]) => mockGetConversationGoal(...args),
 }));
 
 vi.mock("../db/transactions/conversations.js", () => ({
   ConversationNotFoundError,
   InvalidConversationStateError,
+  DeviceBusyError,
   startConversationFromSpeech: (...args: unknown[]) =>
     mockStartConversationFromSpeech(...args),
   continueConversationFromObservedEvent: (...args: unknown[]) =>
@@ -233,7 +245,9 @@ describe("control-plane routing (A.1)", () => {
     const response = await app.inject({
       method: "POST",
       url: "/analyze",
-      headers: { "content-type": "multipart/form-data; boundary=----test-boundary" },
+      headers: {
+        "content-type": "multipart/form-data; boundary=----test-boundary",
+      },
       payload: buildBody(newSpeechMetadata()),
     });
 
@@ -252,7 +266,9 @@ describe("control-plane routing (A.1)", () => {
     const response = await app.inject({
       method: "POST",
       url: "/analyze",
-      headers: { "content-type": "multipart/form-data; boundary=----test-boundary" },
+      headers: {
+        "content-type": "multipart/form-data; boundary=----test-boundary",
+      },
       payload: buildBody(newObservedMetadata()),
     });
 
@@ -274,7 +290,9 @@ describe("control-plane routing (A.1)", () => {
     const response = await app.inject({
       method: "POST",
       url: "/analyze",
-      headers: { "content-type": "multipart/form-data; boundary=----test-boundary" },
+      headers: {
+        "content-type": "multipart/form-data; boundary=----test-boundary",
+      },
       payload: buildBody(meta),
     });
 
@@ -294,13 +312,14 @@ describe("device isolation (A.1/A.3)", () => {
     const response = await app.inject({
       method: "POST",
       url: "/analyze",
-      headers: { "content-type": "multipart/form-data; boundary=----test-boundary" },
-      payload: buildBody(
-        newObservedMetadata({ deviceId: "wrong-device" }),
-      ),
+      headers: {
+        "content-type": "multipart/form-data; boundary=----test-boundary",
+      },
+      payload: buildBody(newObservedMetadata({ deviceId: "wrong-device" })),
     });
 
-    expect(response.statusCode).toBe(404);
+    expect(response.statusCode).toBe(400);
+    expect(response.json().code).toBe("INVALID_REQUEST");
   });
 
   it("returns 409 when observed event on non-waiting_interaction conversation", async () => {
@@ -313,31 +332,36 @@ describe("device isolation (A.1/A.3)", () => {
     const response = await app.inject({
       method: "POST",
       url: "/analyze",
-      headers: { "content-type": "multipart/form-data; boundary=----test-boundary" },
+      headers: {
+        "content-type": "multipart/form-data; boundary=----test-boundary",
+      },
       payload: buildBody(newObservedMetadata()),
     });
 
-    expect(response.statusCode).toBe(409);
-    expect(response.json().code).toBe("INVALID_STATE");
+    expect(response.statusCode).toBe(400);
+    expect(response.json().code).toBe("INVALID_REQUEST");
   });
 });
 
 describe("concurrency control (A.2)", () => {
-  it("returns 409 DEVICE_BUSY when device already has an analyzing conversation", async () => {
-    mockIsDeviceBusy.mockResolvedValue(true);
+  it("returns 400 INVALID_REQUEST when device already has an active conversation", async () => {
+    mockStartConversationFromSpeech.mockRejectedValue(
+      new DeviceBusyError(DEVICE_ID),
+    );
 
     app = buildApp({ agentRunner: agent, dbClient: MOCK_DB_CLIENT });
 
     const response = await app.inject({
       method: "POST",
       url: "/analyze",
-      headers: { "content-type": "multipart/form-data; boundary=----test-boundary" },
+      headers: {
+        "content-type": "multipart/form-data; boundary=----test-boundary",
+      },
       payload: buildBody(newSpeechMetadata()),
     });
 
-    expect(response.statusCode).toBe(409);
-    expect(response.json().code).toBe("DEVICE_BUSY");
-    expect(mockStartConversationFromSpeech).not.toHaveBeenCalled();
+    expect(response.statusCode).toBe(400);
+    expect(response.json().code).toBe("INVALID_REQUEST");
   });
 });
 
@@ -348,7 +372,9 @@ describe("goal persistence (A.3)", () => {
     await app.inject({
       method: "POST",
       url: "/analyze",
-      headers: { "content-type": "multipart/form-data; boundary=----test-boundary" },
+      headers: {
+        "content-type": "multipart/form-data; boundary=----test-boundary",
+      },
       payload: buildBody(newSpeechMetadata()),
     });
 
@@ -363,7 +389,9 @@ describe("goal persistence (A.3)", () => {
     await app.inject({
       method: "POST",
       url: "/analyze",
-      headers: { "content-type": "multipart/form-data; boundary=----test-boundary" },
+      headers: {
+        "content-type": "multipart/form-data; boundary=----test-boundary",
+      },
       payload: buildBody(newObservedMetadata()),
     });
 
@@ -376,11 +404,52 @@ describe("goal persistence (A.3)", () => {
 });
 
 describe("result write-back (A.4)", () => {
+  it("uses the persisted run id across downstream writes and response", async () => {
+    mockCreateRun.mockResolvedValue({ id: RUN_ID });
+
+    app = buildApp({ agentRunner: agent, dbClient: MOCK_DB_CLIENT });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/analyze",
+      headers: {
+        "content-type": "multipart/form-data; boundary=----test-boundary",
+      },
+      payload: buildBody(newSpeechMetadata()),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().runId).toBe(RUN_ID);
+    expect(agent._capturedInputs[0].runId).toBe(RUN_ID);
+    expect(mockSaveScreenSnapshot).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ runId: RUN_ID }),
+    );
+    expect(mockSaveUserMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ runId: RUN_ID }),
+    );
+    expect(mockSaveAssistantGuidance).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ runId: RUN_ID }),
+    );
+    expect(mockCompleteRun).toHaveBeenCalledWith(
+      expect.anything(),
+      RUN_ID,
+      CONVERSATION_ID,
+      expect.anything(),
+      expect.any(Number),
+    );
+  });
+
   it("maps shouldContinue=true to waiting_interaction", async () => {
     agent = createTestAgentRunner(() => ({
       answer: "请点击我的",
       action: { type: "tap" },
-      target: { label: "我的", bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
+      target: {
+        label: "我的",
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      },
       shouldContinue: true,
     }));
 
@@ -389,7 +458,9 @@ describe("result write-back (A.4)", () => {
     const response = await app.inject({
       method: "POST",
       url: "/analyze",
-      headers: { "content-type": "multipart/form-data; boundary=----test-boundary" },
+      headers: {
+        "content-type": "multipart/form-data; boundary=----test-boundary",
+      },
       payload: buildBody(newSpeechMetadata()),
     });
 
@@ -410,7 +481,9 @@ describe("result write-back (A.4)", () => {
     const response = await app.inject({
       method: "POST",
       url: "/analyze",
-      headers: { "content-type": "multipart/form-data; boundary=----test-boundary" },
+      headers: {
+        "content-type": "multipart/form-data; boundary=----test-boundary",
+      },
       payload: buildBody(newSpeechMetadata()),
     });
 
@@ -428,11 +501,13 @@ describe("result write-back (A.4)", () => {
     const response = await app.inject({
       method: "POST",
       url: "/analyze",
-      headers: { "content-type": "multipart/form-data; boundary=----test-boundary" },
+      headers: {
+        "content-type": "multipart/form-data; boundary=----test-boundary",
+      },
       payload: buildBody(newSpeechMetadata()),
     });
 
-    expect(response.statusCode).toBe(400);
+    expect(response.statusCode).toBe(502);
     expect(response.json().code).toBe("ANALYSIS_FAILED");
     expect(mockFailRun).toHaveBeenCalledWith(
       expect.anything(),
@@ -475,16 +550,16 @@ describe("cancel route (A.1)", () => {
       payload: { deviceId: DEVICE_ID },
     });
 
-    expect(response.statusCode).toBe(404);
+    expect(response.statusCode).toBe(400);
+    expect(response.json().code).toBe("INVALID_REQUEST");
   });
 });
 
 describe("full-loop scenario (A.5)", () => {
   it("completes a speech → observed → completed cycle", async () => {
-    let conversationId: string;
-
     // Turn 1: speech_text
     const turn1ConvId = "aaaaaaaa-1111-4111-8111-111111111111";
+    const conversationId = turn1ConvId;
     mockStartConversationFromSpeech.mockResolvedValue({
       id: turn1ConvId,
       status: "analyzing",
@@ -507,13 +582,15 @@ describe("full-loop scenario (A.5)", () => {
     const res1 = await app.inject({
       method: "POST",
       url: "/analyze",
-      headers: { "content-type": "multipart/form-data; boundary=----test-boundary" },
+      headers: {
+        "content-type": "multipart/form-data; boundary=----test-boundary",
+      },
       payload: buildBody(newSpeechMetadata()),
     });
 
     expect(res1.statusCode).toBe(200);
     expect(res1.json().conversationStatus).toBe("waiting_interaction");
-    conversationId = res1.json().conversationId;
+    expect(res1.json().conversationId).toBe(conversationId);
 
     // Turn 2: observed_click
     await app.close();
@@ -547,7 +624,9 @@ describe("full-loop scenario (A.5)", () => {
     const res2 = await app.inject({
       method: "POST",
       url: "/analyze",
-      headers: { "content-type": "multipart/form-data; boundary=----test-boundary" },
+      headers: {
+        "content-type": "multipart/form-data; boundary=----test-boundary",
+      },
       payload: buildBody(
         newObservedMetadata({ conversationId, messageType: "observed_click" }),
       ),

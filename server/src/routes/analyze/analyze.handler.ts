@@ -4,14 +4,17 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 
 import type { AgentRunner } from "../../agents/agent-runner.js";
 import type { DbClient } from "../../db/client.js";
-import { isDeviceBusy } from "../../db/queries/conversations.js";
 import {
+  DeviceBusyError,
   ConversationNotFoundError,
   InvalidConversationStateError,
   continueConversationFromObservedEvent,
   startConversationFromSpeech,
 } from "../../db/transactions/conversations.js";
-import { saveUserMessage, saveAssistantGuidance } from "../../db/transactions/messages.js";
+import {
+  saveUserMessage,
+  saveAssistantGuidance,
+} from "../../db/transactions/messages.js";
 import {
   completeRun,
   createRun,
@@ -124,15 +127,6 @@ export function createAnalyzeHandler(
 
     const { db } = dbClient;
 
-    /* ---- A.2: device-level concurrency check ---- */
-    const busy = await isDeviceBusy(db, metadata.deviceId);
-    if (busy) {
-      return reply.status(409).send({
-        code: "DEVICE_BUSY",
-        message: `Device ${metadata.deviceId} already has an active analysis in progress.`,
-      } satisfies AnalyzeError);
-    }
-
     /* ---- A.1: route by message type ---- */
     const isSpeech = metadata.messageType === "speech_text";
     let conversationId: string;
@@ -165,14 +159,20 @@ export function createAnalyzeHandler(
       }
     } catch (error) {
       if (error instanceof ConversationNotFoundError) {
-        return reply.status(404).send({
+        return reply.status(400).send({
           code: "INVALID_REQUEST",
           message: error.message,
         } satisfies AnalyzeError);
       }
       if (error instanceof InvalidConversationStateError) {
-        return reply.status(409).send({
-          code: "INVALID_STATE",
+        return reply.status(400).send({
+          code: "INVALID_REQUEST",
+          message: error.message,
+        } satisfies AnalyzeError);
+      }
+      if (error instanceof DeviceBusyError) {
+        return reply.status(400).send({
+          code: "INVALID_REQUEST",
           message: error.message,
         } satisfies AnalyzeError);
       }
@@ -184,49 +184,50 @@ export function createAnalyzeHandler(
     const runIndex = await getNextRunIndex(db, conversationId);
     const previousRunId = await getLatestRunId(db, conversationId);
 
-    await createRun(db, {
-      conversationId,
-      runIndex,
-      previousRunId,
-      modelProvider: "mock",
-      modelName: "mock",
-      inputContextJson: {
-        goal,
-        messageType: metadata.messageType,
-        messageText: metadata.messageText,
-        packageName: metadata.packageName,
-        activityName: metadata.activityName,
-        screenWidth: metadata.screenWidth,
-        screenHeight: metadata.screenHeight,
-      },
-    });
-
-    await saveScreenSnapshot(db, {
-      conversationId,
-      runId,
-      packageName: metadata.packageName,
-      activityName: metadata.activityName ?? null,
-      screenWidth: metadata.screenWidth,
-      screenHeight: metadata.screenHeight,
-      imageWidth: metadata.imageWidth,
-      imageHeight: metadata.imageHeight,
-      nodes: metadata.nodes,
-      capturedAt: new Date(),
-    });
-
-    await saveUserMessage(db, {
-      conversationId,
-      runId,
-      messageType: metadata.messageType,
-      text: metadata.messageText,
-    });
-
     /* ---- A.3: assemble + run agent + A.4: write back ---- */
     try {
+      const createdRun = await createRun(db, {
+        id: runId,
+        conversationId,
+        runIndex,
+        previousRunId,
+        modelProvider: "mock",
+        modelName: "mock",
+        inputContextJson: {
+          goal,
+          messageType: metadata.messageType,
+          messageText: metadata.messageText,
+          packageName: metadata.packageName,
+          activityName: metadata.activityName,
+          screenWidth: metadata.screenWidth,
+          screenHeight: metadata.screenHeight,
+        },
+      });
+
+      await saveScreenSnapshot(db, {
+        conversationId,
+        runId: createdRun.id,
+        packageName: metadata.packageName,
+        activityName: metadata.activityName ?? null,
+        screenWidth: metadata.screenWidth,
+        screenHeight: metadata.screenHeight,
+        imageWidth: metadata.imageWidth,
+        imageHeight: metadata.imageHeight,
+        nodes: metadata.nodes,
+        capturedAt: new Date(),
+      });
+
+      await saveUserMessage(db, {
+        conversationId,
+        runId: createdRun.id,
+        messageType: metadata.messageType,
+        text: metadata.messageText,
+      });
+
       const agentInput = await assembleAgentRunInput({
         metadata,
         conversationId,
-        runId,
+        runId: createdRun.id,
         goal,
         db,
         screenshotBuffer,
@@ -237,17 +238,23 @@ export function createAnalyzeHandler(
       const runnerOutput = await agentRunner.run(agentInput);
       const latencyMs = Date.now() - startedAt;
 
-      await completeRun(db, runId, conversationId, runnerOutput, latencyMs);
+      await completeRun(
+        db,
+        createdRun.id,
+        conversationId,
+        runnerOutput,
+        latencyMs,
+      );
 
       await saveAssistantGuidance(db, {
         conversationId,
-        runId,
+        runId: createdRun.id,
         text: runnerOutput.answer,
       });
 
       return reply.send({
         conversationId,
-        runId,
+        runId: createdRun.id,
         conversationStatus: runnerOutput.shouldContinue
           ? "waiting_interaction"
           : "completed",
@@ -258,18 +265,19 @@ export function createAnalyzeHandler(
         savedScreenshotPath,
       } satisfies AnalyzeResponse);
     } catch (error) {
-      await failRun(
-        db,
-        runId,
-        conversationId,
-        "ANALYSIS_FAILED",
-        error instanceof Error ? error.message : "Agent run failed.",
-      );
-
-      return reply.status(400).send({
-        code: "ANALYSIS_FAILED",
-        message:
+      if (runId) {
+        await failRun(
+          db,
+          runId,
+          conversationId,
+          "ANALYSIS_FAILED",
           error instanceof Error ? error.message : "Agent run failed.",
+        );
+      }
+
+      return reply.status(502).send({
+        code: "ANALYSIS_FAILED",
+        message: error instanceof Error ? error.message : "Agent run failed.",
       } satisfies AnalyzeError);
     }
   };

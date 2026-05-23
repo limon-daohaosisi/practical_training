@@ -1,5 +1,6 @@
 import { desc, eq } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import { sql } from "drizzle-orm";
 
 import type { AgentRunOutput } from "../../agents/agent-runner.js";
 import * as schema from "../../db/schema/index.js";
@@ -11,6 +12,7 @@ type Database = NodePgDatabase<typeof schema>;
 export async function createRun(
   db: Database,
   params: {
+    id: string;
     conversationId: string;
     runIndex: number;
     previousRunId: string | null;
@@ -22,6 +24,7 @@ export async function createRun(
   const [created] = await db
     .insert(runs)
     .values({
+      id: params.id,
       conversationId: params.conversationId,
       runIndex: params.runIndex,
       previousRunId: params.previousRunId,
@@ -42,6 +45,8 @@ export async function completeRun(
   result: AgentRunOutput,
   latencyMs: number,
 ) {
+  const now = new Date();
+
   await db
     .update(runs)
     .set({
@@ -50,24 +55,24 @@ export async function completeRun(
       resultAnswerText: result.answer,
       resultActionType: result.action.type,
       resultTargetLabel: result.target?.label ?? null,
-      resultTargetBoundsJson:
-        (result.target?.bounds ?? null) as unknown as Record<string, unknown> | null,
+      resultTargetBoundsJson: (result.target?.bounds ??
+        null) as unknown as Record<string, unknown> | null,
       latencyMs,
-      completedAt: new Date(),
+      completedAt: now,
     })
     .where(eq(runs.id, runId));
 
-  const newStatus = result.shouldContinue
-    ? "waiting_interaction"
-    : "completed";
+  const newStatus = result.shouldContinue ? "waiting_interaction" : "completed";
 
   await db
     .update(conversations)
     .set({
       status: newStatus,
+      updatedAt: now,
+      version: sql`${conversations.version} + 1`,
       ...(newStatus === "waiting_interaction"
-        ? { waitStartedAt: new Date() }
-        : { endedAt: new Date() }),
+        ? { waitStartedAt: now, endedAt: null }
+        : { waitStartedAt: null, endedAt: now }),
     })
     .where(eq(conversations.id, conversationId));
 }
@@ -79,13 +84,15 @@ export async function failRun(
   errorCode: string,
   errorMessage: string,
 ) {
+  const now = new Date();
+
   await db
     .update(runs)
     .set({
       status: "failed",
       errorCode,
       errorMessage,
-      completedAt: new Date(),
+      completedAt: now,
     })
     .where(eq(runs.id, runId));
 
@@ -93,7 +100,10 @@ export async function failRun(
     .update(conversations)
     .set({
       status: "failed",
-      endedAt: new Date(),
+      waitStartedAt: null,
+      endedAt: now,
+      updatedAt: now,
+      version: sql`${conversations.version} + 1`,
     })
     .where(eq(conversations.id, conversationId));
 }

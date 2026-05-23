@@ -7,6 +7,7 @@ import {
 } from "../../db/transactions/conversations.js";
 import type {
   CancelBody,
+  CancelError,
   CancelParams,
   CancelResponse,
 } from "./cancel.schema.js";
@@ -28,11 +29,10 @@ export function createCancelHandler(dbClient?: DbClient) {
         );
       } catch (error) {
         if (error instanceof ConversationNotFoundError) {
-          return reply.status(404).send({
-            conversationId: request.params.conversationId,
-            status: "cancelled" as const,
-            closedReason: "user_exit" as const,
-          });
+          return reply.status(400).send({
+            code: "INVALID_REQUEST",
+            message: error.message,
+          } satisfies CancelError);
         }
         throw error;
       }

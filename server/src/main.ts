@@ -1,8 +1,12 @@
+import { config as loadEnv } from "dotenv";
+
 import { buildApp } from "./app.js";
 import { createDbClient } from "./db/client.js";
 
 const DEFAULT_HOST = "0.0.0.0";
 const DEFAULT_PORT = 3000;
+
+loadEnv();
 
 async function main() {
   const dbClient = createDbClient();
