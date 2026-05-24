@@ -188,7 +188,7 @@ interface AgentRunner {
 
 ### 验收
 
-- 新 `speech_text` 可以替换旧活跃会话
+- 新 `speech_text` 只能在当前设备没有活跃会话时开启；若已有活跃会话，必须先通过显式 cancel 结束后再继续
 - `observed_click` / `observed_scroll` 只能续接 `waiting_interaction`
 - 非法续接不会偷偷新建会话
 - 两次近同时事件不会把 `conversation.version` 覆盖乱

@@ -1,9 +1,11 @@
 package com.example.myapplication.core.session
 
+import android.content.Context
 import com.example.myapplication.core.capture.CaptureGateway
 import com.example.myapplication.core.capture.AccessibilityCaptureGateway
 import com.example.myapplication.core.network.AnalyzeApiClient
 import com.example.myapplication.core.network.AnalyzeGateway
+import com.example.myapplication.core.network.DeviceIdProvider
 import com.example.myapplication.feature.session.AnalyzeSessionCoordinator
 
 object AnalyzeRuntime {
@@ -11,11 +13,31 @@ object AnalyzeRuntime {
     private const val defaultEndpoint = "http://10.0.2.2:3000/analyze"
 
     private val captureGateway: CaptureGateway = AccessibilityCaptureGateway()
-    private val analyzeGateway: AnalyzeGateway = AnalyzeApiClient(defaultEndpoint)
+    @Volatile
+    private var coordinatorRef: AnalyzeSessionCoordinator? = null
 
-    val coordinator = AnalyzeSessionCoordinator(captureGateway, analyzeGateway)
+    private fun coordinator(context: Context): AnalyzeSessionCoordinator {
+        val current = coordinatorRef
+        if (current != null) return current
 
-    suspend fun analyzeNow() {
-        coordinator.requestAnalyze(defaultQuestion)
+        return synchronized(this) {
+            coordinatorRef
+                ?: AnalyzeSessionCoordinator(
+                    captureGateway = captureGateway,
+                    analyzeGateway =
+                        AnalyzeApiClient(
+                            endpoint = defaultEndpoint,
+                            deviceIdProvider = DeviceIdProvider(context.applicationContext),
+                        ),
+                ).also { created ->
+                    coordinatorRef = created
+                }
+        }
+    }
+
+    fun state(context: Context) = coordinator(context).state
+
+    suspend fun analyzeNow(context: Context) {
+        coordinator(context).requestAnalyze(defaultQuestion)
     }
 }
