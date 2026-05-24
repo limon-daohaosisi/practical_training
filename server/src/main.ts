@@ -1,10 +1,12 @@
+import { createAgentRunnerFromEnv } from "./agents/create-agent-runner.js";
 import { buildApp } from "./app.js";
 
 const DEFAULT_HOST = "0.0.0.0";
 const DEFAULT_PORT = 3000;
 
 async function main() {
-  const app = buildApp();
+  const agentRunner = createAgentRunnerFromEnv();
+  const app = buildApp({ agentRunner });
   const port = Number(process.env.PORT ?? DEFAULT_PORT);
   const host = process.env.HOST ?? DEFAULT_HOST;
 
