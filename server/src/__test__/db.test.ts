@@ -1,6 +1,14 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ORIGINAL_DATABASE_URL = process.env.DATABASE_URL;
+
+beforeEach(() => {
+  if (ORIGINAL_DATABASE_URL === undefined) {
+    delete process.env.DATABASE_URL;
+  } else {
+    process.env.DATABASE_URL = ORIGINAL_DATABASE_URL;
+  }
+});
 
 afterEach(() => {
   if (ORIGINAL_DATABASE_URL === undefined) {
@@ -34,5 +42,14 @@ describe("createDbClient", () => {
     expect(() => createDbClient()).toThrowError(
       "DATABASE_URL is required to initialize the database client.",
     );
+  });
+
+  it("uses DATABASE_URL from environment when provided", async () => {
+    process.env.DATABASE_URL =
+      "postgres://postgres:postgres@127.0.0.1:55435/practical_training";
+
+    const { createDbClient } = await import("../db/client.js");
+
+    expect(() => createDbClient()).not.toThrow();
   });
 });

@@ -46,7 +46,7 @@ class OverlayEntryService : Service() {
             setOnClickListener {
                 serviceScope.launch {
                     runCatching {
-                        AnalyzeRuntime.analyzeNow()
+                        AnalyzeRuntime.analyzeNow(this@OverlayEntryService)
                     }.onSuccess {
                         Toast.makeText(
                             this@OverlayEntryService,

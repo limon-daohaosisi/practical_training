@@ -12,12 +12,18 @@ import java.net.URL
 import kotlin.text.Charsets.UTF_8
 
 class AnalyzeApiClient(
-    private val endpoint: String
+    private val endpoint: String,
+    private val deviceIdProvider: DeviceIdProvider,
 ) : AnalyzeGateway {
 
     override suspend fun analyze(question: String, capture: CaptureResult): AnalyzeResponse {
         return withContext(Dispatchers.IO) {
-            val metadata = AnalyzeRequestBuilder.buildMetadata(question, capture)
+            val metadata =
+                AnalyzeRequestBuilder.buildMetadata(
+                    deviceId = deviceIdProvider.get(),
+                    messageText = question,
+                    capture = capture,
+                )
             val screenshot = capture.screenshotBytes
                 ?: error("Screenshot bytes are not available yet for explicit analyze requests.")
             val boundary = "----guide-assistant-${System.currentTimeMillis()}"

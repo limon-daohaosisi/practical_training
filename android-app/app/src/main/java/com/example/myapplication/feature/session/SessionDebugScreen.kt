@@ -44,7 +44,7 @@ fun SessionDebugScreen(
     val capture by CaptureAccessibilityService.capture.collectAsState()
     val screenshotPath by CaptureAccessibilityService.screenshotPath.collectAsState()
     val events by CaptureAccessibilityService.events.collectAsState()
-    val analyzeState by AnalyzeRuntime.coordinator.state.collectAsState()
+    val analyzeState by AnalyzeRuntime.state(context).collectAsState()
 
     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
         LazyColumn(

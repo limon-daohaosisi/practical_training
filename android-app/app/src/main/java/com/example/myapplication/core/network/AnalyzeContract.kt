@@ -7,7 +7,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 data class AnalyzeMetadata(
-    val question: String,
+    val deviceId: String,
+    val conversationId: String? = null,
+    val messageType: String,
+    val messageText: String?,
     val packageName: String,
     val activityName: String,
     val screenWidth: Int,
@@ -43,8 +46,13 @@ interface AnalyzeGateway {
 
 object AnalyzeRequestBuilder {
 
-    fun buildMetadata(question: String, capture: CaptureResult): AnalyzeMetadata {
-        require(question.isNotBlank()) { "question must not be blank" }
+    fun buildMetadata(
+        deviceId: String,
+        messageText: String,
+        capture: CaptureResult,
+    ): AnalyzeMetadata {
+        require(deviceId.isNotBlank()) { "deviceId must not be blank" }
+        require(messageText.isNotBlank()) { "messageText must not be blank" }
         require(capture.packageName.isNotBlank()) { "packageName must not be blank" }
         require(capture.screenWidth > 0) { "screenWidth must be > 0" }
         require(capture.screenHeight > 0) { "screenHeight must be > 0" }
@@ -52,7 +60,9 @@ object AnalyzeRequestBuilder {
         require(capture.imageHeight > 0) { "imageHeight must be > 0 — screenshot not ready" }
 
         return AnalyzeMetadata(
-            question = question,
+            deviceId = deviceId,
+            messageType = "speech_text",
+            messageText = messageText,
             packageName = capture.packageName,
             activityName = capture.activityName,
             screenWidth = capture.screenWidth,
@@ -67,7 +77,12 @@ object AnalyzeRequestBuilder {
 object AnalyzeJson {
 
     fun AnalyzeMetadata.toJson(): String = JSONObject().apply {
-        put("question", question)
+        put("deviceId", deviceId)
+        if (conversationId != null) {
+            put("conversationId", conversationId)
+        }
+        put("messageType", messageType)
+        put("messageText", messageText)
         put("packageName", packageName)
         put("activityName", activityName)
         put("screenWidth", screenWidth)
