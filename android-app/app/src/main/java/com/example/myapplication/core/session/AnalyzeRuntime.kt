@@ -3,10 +3,13 @@ package com.example.myapplication.core.session
 import android.content.Context
 import com.example.myapplication.core.capture.CaptureGateway
 import com.example.myapplication.core.capture.AccessibilityCaptureGateway
+import com.example.myapplication.core.model.GuidanceCue
 import com.example.myapplication.core.network.AnalyzeApiClient
 import com.example.myapplication.core.network.AnalyzeGateway
 import com.example.myapplication.core.network.DeviceIdProvider
+import com.example.myapplication.feature.session.AnalyzeRequestState
 import com.example.myapplication.feature.session.AnalyzeSessionCoordinator
+import kotlinx.coroutines.flow.map
 
 object AnalyzeRuntime {
     private const val defaultQuestion = "请分析当前页面"
@@ -37,7 +40,24 @@ object AnalyzeRuntime {
 
     fun state(context: Context) = coordinator(context).state
 
+    fun isRunning(context: Context): Boolean = coordinator(context).isRunning
+
+    fun guidanceCue(context: Context) = state(context).map { state ->
+        when (state) {
+            is AnalyzeRequestState.Success -> state.guidanceCue
+            else -> GuidanceCue.Hidden
+        }
+    }
+
     suspend fun analyzeNow(context: Context) {
         coordinator(context).requestAnalyze(defaultQuestion)
+    }
+
+    suspend fun onObservedClick(context: Context) {
+        coordinator(context).requestFollowUpAnalyzeAfterClick()
+    }
+
+    suspend fun cancel(context: Context) {
+        coordinator(context).cancelCurrentAnalyze()
     }
 }

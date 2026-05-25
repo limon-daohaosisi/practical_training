@@ -20,7 +20,16 @@ data class AnalyzeMetadata(
     val nodes: List<NormalizedNode>
 )
 
+data class AnalyzeRequest(
+    val messageType: String,
+    val messageText: String?,
+    val conversationId: String? = null,
+)
+
 data class AnalyzeResponse(
+    val conversationId: String,
+    val runId: String,
+    val conversationStatus: String,
     val answer: String,
     val target: TargetInfo?,
     val action: ActionInfo
@@ -40,19 +49,31 @@ data class AnalyzeError(
     val message: String
 )
 
+data class CancelResponse(
+    val conversationId: String,
+    val status: String,
+    val closedReason: String,
+)
+
 interface AnalyzeGateway {
-    suspend fun analyze(question: String, capture: CaptureResult): AnalyzeResponse
+    suspend fun analyze(request: AnalyzeRequest, capture: CaptureResult): AnalyzeResponse
+
+    suspend fun cancel(conversationId: String): CancelResponse
 }
 
 object AnalyzeRequestBuilder {
 
     fun buildMetadata(
         deviceId: String,
-        messageText: String,
+        request: AnalyzeRequest,
         capture: CaptureResult,
     ): AnalyzeMetadata {
         require(deviceId.isNotBlank()) { "deviceId must not be blank" }
-        require(messageText.isNotBlank()) { "messageText must not be blank" }
+        if (request.messageType == "speech_text") {
+            require(!request.messageText.isNullOrBlank()) { "messageText must not be blank for speech_text" }
+        } else {
+            require(!request.conversationId.isNullOrBlank()) { "conversationId must not be blank for observed events" }
+        }
         require(capture.packageName.isNotBlank()) { "packageName must not be blank" }
         require(capture.screenWidth > 0) { "screenWidth must be > 0" }
         require(capture.screenHeight > 0) { "screenHeight must be > 0" }
@@ -61,8 +82,9 @@ object AnalyzeRequestBuilder {
 
         return AnalyzeMetadata(
             deviceId = deviceId,
-            messageType = "speech_text",
-            messageText = messageText,
+            conversationId = request.conversationId,
+            messageType = request.messageType,
+            messageText = request.messageText,
             packageName = capture.packageName,
             activityName = capture.activityName,
             screenWidth = capture.screenWidth,
@@ -82,7 +104,7 @@ object AnalyzeJson {
             put("conversationId", conversationId)
         }
         put("messageType", messageType)
-        put("messageText", messageText)
+        put("messageText", messageText ?: JSONObject.NULL)
         put("packageName", packageName)
         put("activityName", activityName)
         put("screenWidth", screenWidth)
@@ -114,6 +136,9 @@ object AnalyzeJson {
         val targetObj = obj.optJSONObject("target")
         val actionObj = obj.getJSONObject("action")
         return AnalyzeResponse(
+            conversationId = obj.getString("conversationId"),
+            runId = obj.getString("runId"),
+            conversationStatus = obj.getString("conversationStatus"),
             answer = obj.getString("answer"),
             target = if (targetObj != null) {
                 TargetInfo(
@@ -137,6 +162,15 @@ object AnalyzeJson {
         return AnalyzeError(
             code = obj.getString("code"),
             message = obj.getString("message")
+        )
+    }
+
+    fun parseCancelResponse(json: String): CancelResponse {
+        val obj = JSONObject(json)
+        return CancelResponse(
+            conversationId = obj.getString("conversationId"),
+            status = obj.getString("status"),
+            closedReason = obj.getString("closedReason"),
         )
     }
 }

@@ -1,8 +1,10 @@
 package com.example.myapplication.core.network
 
 import com.example.myapplication.core.model.CaptureResult
+import com.example.myapplication.core.network.AnalyzeJson.parseCancelResponse
 import com.example.myapplication.core.network.AnalyzeJson.parseResponse
 import com.example.myapplication.core.network.AnalyzeJson.toJson
+import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
@@ -16,12 +18,14 @@ class AnalyzeApiClient(
     private val deviceIdProvider: DeviceIdProvider,
 ) : AnalyzeGateway {
 
-    override suspend fun analyze(question: String, capture: CaptureResult): AnalyzeResponse {
+    private val cancelEndpointBase = endpoint.removeSuffix("/analyze")
+
+    override suspend fun analyze(request: AnalyzeRequest, capture: CaptureResult): AnalyzeResponse {
         return withContext(Dispatchers.IO) {
             val metadata =
                 AnalyzeRequestBuilder.buildMetadata(
                     deviceId = deviceIdProvider.get(),
-                    messageText = question,
+                    request = request,
                     capture = capture,
                 )
             val screenshot = capture.screenshotBytes
@@ -59,6 +63,40 @@ class AnalyzeApiClient(
                 return@withContext parseResponse(body)
             }
             val error = AnalyzeJson.parseError(body)
+            error("${error.code}: ${error.message}")
+        }
+    }
+
+    override suspend fun cancel(conversationId: String): CancelResponse {
+        return withContext(Dispatchers.IO) {
+            val connection = (
+                URL("$cancelEndpointBase/conversations/$conversationId/cancel")
+                    .openConnection() as HttpURLConnection
+                ).apply {
+                requestMethod = "POST"
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                setRequestProperty("Accept", "application/json")
+            }
+            val body = JSONObject()
+                .put("deviceId", deviceIdProvider.get())
+                .toString()
+
+            DataOutputStream(connection.outputStream).use { output ->
+                output.write(body.toByteArray(UTF_8))
+                output.flush()
+            }
+
+            val stream = if (connection.responseCode in 200..299) {
+                connection.inputStream
+            } else {
+                connection.errorStream ?: error("Cancel request failed with ${connection.responseCode}")
+            }
+            val responseBody = BufferedInputStream(stream).bufferedReader().use { it.readText() }
+            if (connection.responseCode in 200..299) {
+                return@withContext parseCancelResponse(responseBody)
+            }
+            val error = AnalyzeJson.parseError(responseBody)
             error("${error.code}: ${error.message}")
         }
     }
