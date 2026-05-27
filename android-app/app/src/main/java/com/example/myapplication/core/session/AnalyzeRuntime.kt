@@ -12,7 +12,7 @@ import com.example.myapplication.feature.session.AnalyzeSessionCoordinator
 import kotlinx.coroutines.flow.map
 
 object AnalyzeRuntime {
-    private const val defaultQuestion = "请分析当前页面"
+    private const val defaultQuestion = "帮我找一下“我的”在哪里"
     private const val defaultEndpoint = "http://10.0.2.2:3000/analyze"
 
     private val captureGateway: CaptureGateway = AccessibilityCaptureGateway()
@@ -41,6 +41,9 @@ object AnalyzeRuntime {
     fun state(context: Context) = coordinator(context).state
 
     fun isRunning(context: Context): Boolean = coordinator(context).isRunning
+
+    fun shouldListenForObservedInteraction(context: Context): Boolean =
+        coordinator(context).shouldListenForObservedInteraction
 
     fun guidanceCue(context: Context) = state(context).map { state ->
         when (state) {

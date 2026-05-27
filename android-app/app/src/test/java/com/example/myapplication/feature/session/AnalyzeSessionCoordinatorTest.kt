@@ -193,6 +193,159 @@ class AnalyzeSessionCoordinatorTest {
         assertEquals(CONVERSATION_ID, requests[1].conversationId)
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun observedClick_afterScrollHint_sendsFollowUpWithSameConversationId() = runTest {
+        val capture = sampleCapture()
+        val requests = mutableListOf<AnalyzeRequest>()
+
+        val captureGateway = object : CaptureGateway {
+            override suspend fun captureNow(): CaptureResult = capture
+        }
+        val analyzeGateway = object : AnalyzeGateway {
+            override suspend fun analyze(
+                request: AnalyzeRequest,
+                capture: CaptureResult,
+            ): AnalyzeResponse {
+                requests += request
+                return if (request.messageType == "speech_text") {
+                    AnalyzeResponse(
+                        conversationId = CONVERSATION_ID,
+                        runId = "22222222-2222-4222-8222-222222222222",
+                        conversationStatus = "waiting_interaction",
+                        answer = "请上下滑动页面",
+                        target = null,
+                        action = ActionInfo(type = "scroll"),
+                    )
+                } else {
+                    AnalyzeResponse(
+                        conversationId = CONVERSATION_ID,
+                        runId = "33333333-3333-4333-8333-333333333333",
+                        conversationStatus = "waiting_interaction",
+                        answer = "已继续分析",
+                        target = null,
+                        action = ActionInfo(type = "none"),
+                    )
+                }
+            }
+
+            override suspend fun cancel(conversationId: String): CancelResponse =
+                cancelResponse(conversationId)
+        }
+
+        val coordinator = AnalyzeSessionCoordinator(captureGateway, analyzeGateway)
+
+        coordinator.requestAnalyze("请分析当前页面")
+        val followUp = launch {
+            coordinator.requestFollowUpAnalyzeAfterClick()
+        }
+        runCurrent()
+        advanceTimeBy(350)
+        followUp.join()
+
+        assertEquals(2, requests.size)
+        assertEquals("observed_scroll", requests[1].messageType)
+        assertEquals(CONVERSATION_ID, requests[1].conversationId)
+    }
+
+    @Test
+    fun observedClick_ignoresIdleAndCompletedStates() = runTest {
+        val captureGateway = object : CaptureGateway {
+            override suspend fun captureNow(): CaptureResult = sampleCapture()
+        }
+        var requestCount = 0
+        val analyzeGateway = object : AnalyzeGateway {
+            override suspend fun analyze(
+                request: AnalyzeRequest,
+                capture: CaptureResult,
+            ): AnalyzeResponse {
+                requestCount += 1
+                return AnalyzeResponse(
+                    conversationId = CONVERSATION_ID,
+                    runId = "22222222-2222-4222-8222-222222222222",
+                    conversationStatus = "completed",
+                    answer = "已完成",
+                    target = null,
+                    action = ActionInfo(type = "none"),
+                )
+            }
+
+            override suspend fun cancel(conversationId: String): CancelResponse =
+                cancelResponse(conversationId)
+        }
+
+        val coordinator = AnalyzeSessionCoordinator(captureGateway, analyzeGateway)
+
+        coordinator.requestFollowUpAnalyzeAfterClick()
+        assertEquals(0, requestCount)
+
+        coordinator.requestAnalyze("请分析当前页面")
+        assertEquals(1, requestCount)
+
+        coordinator.requestFollowUpAnalyzeAfterClick()
+        assertEquals(1, requestCount)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun observedClick_consumesOnlyOneFollowUpUntilServerReturnsWaitingAgain() = runTest {
+        val targetBounds = NormalizedBounds(900, 2100, 1040, 2220)
+        val capture = sampleCapture()
+        val requests = mutableListOf<AnalyzeRequest>()
+
+        val captureGateway = object : CaptureGateway {
+            override suspend fun captureNow(): CaptureResult = capture
+        }
+        val analyzeGateway = object : AnalyzeGateway {
+            override suspend fun analyze(
+                request: AnalyzeRequest,
+                capture: CaptureResult,
+            ): AnalyzeResponse {
+                requests += request
+                return if (request.messageType == "speech_text") {
+                    AnalyzeResponse(
+                        conversationId = CONVERSATION_ID,
+                        runId = "22222222-2222-4222-8222-222222222222",
+                        conversationStatus = "waiting_interaction",
+                        answer = "请点击发送按钮",
+                        target = TargetInfo(
+                            label = "发送按钮",
+                            bounds = targetBounds,
+                        ),
+                        action = ActionInfo(type = "tap"),
+                    )
+                } else {
+                    AnalyzeResponse(
+                        conversationId = CONVERSATION_ID,
+                        runId = "33333333-3333-4333-8333-333333333333",
+                        conversationStatus = "completed",
+                        answer = "已继续分析",
+                        target = null,
+                        action = ActionInfo(type = "none"),
+                    )
+                }
+            }
+
+            override suspend fun cancel(conversationId: String): CancelResponse =
+                cancelResponse(conversationId)
+        }
+
+        val coordinator = AnalyzeSessionCoordinator(captureGateway, analyzeGateway)
+
+        coordinator.requestAnalyze("请分析当前页面")
+        val first = launch { coordinator.requestFollowUpAnalyzeAfterClick() }
+        runCurrent()
+        val second = launch { coordinator.requestFollowUpAnalyzeAfterClick() }
+        runCurrent()
+        advanceTimeBy(350)
+        first.join()
+        second.join()
+
+        assertEquals(2, requests.size)
+        assertEquals("speech_text", requests[0].messageType)
+        assertEquals("observed_click", requests[1].messageType)
+    }
+
     @Test
     fun requestAnalyze_retriesAnalyzeFailureAutomatically() = runTest {
         var attempts = 0

@@ -33,13 +33,18 @@ class AnalyzeSessionCoordinator(
     private val mutableState = MutableStateFlow<AnalyzeRequestState>(AnalyzeRequestState.Idle)
     private val followUpMutex = Mutex()
     private var sessionVersion = 0
+    private var pendingObservedMessageType: String? = null
     val state: StateFlow<AnalyzeRequestState> = mutableState.asStateFlow()
 
     val isRunning: Boolean
         get() = mutableState.value.isRunningState()
 
+    val shouldListenForObservedInteraction: Boolean
+        get() = pendingObservedMessageType != null
+
     suspend fun requestAnalyze(question: String) {
         val version = ++sessionVersion
+        pendingObservedMessageType = null
         requestAnalyze(
             AnalyzeRequest(
                 messageType = "speech_text",
@@ -53,18 +58,18 @@ class AnalyzeSessionCoordinator(
         followUpMutex.withLock {
             val current = mutableState.value
             val version = sessionVersion
-            if (current !is AnalyzeRequestState.Success ||
-                current.conversationStatus != "waiting_interaction"
-            ) {
+            val nextMessageType = pendingObservedMessageType
+            if (current !is AnalyzeRequestState.Success || nextMessageType == null) {
                 return
             }
 
+            pendingObservedMessageType = null
             mutableState.value = current.copy(guidanceCue = GuidanceCue.Hidden)
             delay(FOLLOW_UP_DELAY_MS)
             requestAnalyze(
                 AnalyzeRequest(
                     conversationId = current.conversationId,
-                    messageType = "observed_click",
+                    messageType = nextMessageType,
                     messageText = null,
                 ),
                 version = version,
@@ -77,6 +82,7 @@ class AnalyzeSessionCoordinator(
         if (current == AnalyzeRequestState.Idle) return
 
         sessionVersion++
+        pendingObservedMessageType = null
         mutableState.value = AnalyzeRequestState.Idle
         if (current is AnalyzeRequestState.Success) {
             runCatching {
@@ -94,6 +100,7 @@ class AnalyzeSessionCoordinator(
         version: Int,
     ) {
         var lastError: Exception? = null
+        pendingObservedMessageType = null
 
         repeat(MAX_ANALYZE_ATTEMPTS) { attemptIndex ->
             if (version != sessionVersion) return
@@ -123,14 +130,28 @@ class AnalyzeSessionCoordinator(
     }
 
     private fun AnalyzeResponse.toRequestState(): AnalyzeRequestState = when (conversationStatus) {
-        "waiting_interaction" -> AnalyzeRequestState.Success(
-            answer = answer,
-            conversationId = conversationId,
-            conversationStatus = conversationStatus,
-            guidanceCue = toGuidanceCue(),
-        )
-        "completed" -> AnalyzeRequestState.Idle
-        "failed" -> AnalyzeRequestState.Error(answer)
+        "waiting_interaction" -> {
+            val cue = toGuidanceCue()
+            pendingObservedMessageType = when (action.type) {
+                "tap" -> "observed_click"
+                "scroll" -> "observed_scroll"
+                else -> null
+            }
+            AnalyzeRequestState.Success(
+                answer = answer,
+                conversationId = conversationId,
+                conversationStatus = conversationStatus,
+                guidanceCue = cue,
+            )
+        }
+        "completed" -> {
+            pendingObservedMessageType = null
+            AnalyzeRequestState.Idle
+        }
+        "failed" -> {
+            pendingObservedMessageType = null
+            AnalyzeRequestState.Error(answer)
+        }
         else -> AnalyzeRequestState.Error("Unsupported conversation status: $conversationStatus")
     }
 

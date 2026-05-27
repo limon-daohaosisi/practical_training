@@ -9,7 +9,6 @@ import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.os.IBinder
 import android.view.Gravity
-import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
@@ -30,7 +29,6 @@ class OverlayEntryService : Service() {
     private lateinit var windowManager: WindowManager
     private var overlayButton: View? = null
     private var guidanceView: GuidanceOverlayView? = null
-    private var touchMonitorView: View? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -39,7 +37,6 @@ class OverlayEntryService : Service() {
         super.onCreate()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         showGuidanceLayer()
-        showTouchMonitorLayer()
         showOverlayButton()
         observeAnalyzeState()
         observeUserClicks()
@@ -48,8 +45,6 @@ class OverlayEntryService : Service() {
     override fun onDestroy() {
         guidanceView?.let(windowManager::removeView)
         guidanceView = null
-        touchMonitorView?.let(windowManager::removeView)
-        touchMonitorView = null
         overlayButton?.let(windowManager::removeView)
         overlayButton = null
         serviceScope.cancel()
@@ -125,50 +120,6 @@ class OverlayEntryService : Service() {
         windowManager.addView(view, params)
     }
 
-    private fun showTouchMonitorLayer() {
-        if (touchMonitorView != null) return
-
-        val view = View(this).apply {
-            setOnTouchListener { _, event ->
-                if (event.action == MotionEvent.ACTION_OUTSIDE &&
-                    !isInsideOverlayButton(event.rawX, event.rawY)
-                ) {
-                    serviceScope.launch {
-                        AnalyzeRuntime.onObservedClick(this@OverlayEntryService)
-                    }
-                }
-                false
-            }
-        }
-
-        val params = WindowManager.LayoutParams(
-            1,
-            1,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-        }
-
-        touchMonitorView = view
-        windowManager.addView(view, params)
-    }
-
-    private fun isInsideOverlayButton(rawX: Float, rawY: Float): Boolean {
-        val button = overlayButton ?: return false
-        val location = IntArray(2)
-        button.getLocationOnScreen(location)
-        val left = location[0]
-        val top = location[1]
-        val right = left + button.width
-        val bottom = top + button.height
-        return rawX >= left && rawX <= right && rawY >= top && rawY <= bottom
-    }
-
     private fun observeAnalyzeState() {
         serviceScope.launch {
             AnalyzeRuntime.state(this@OverlayEntryService).collectLatest { state ->
@@ -186,7 +137,9 @@ class OverlayEntryService : Service() {
     private fun observeUserClicks() {
         serviceScope.launch {
             CaptureAccessibilityService.observedClicks.collect {
-                AnalyzeRuntime.onObservedClick(this@OverlayEntryService)
+                if (AnalyzeRuntime.shouldListenForObservedInteraction(this@OverlayEntryService)) {
+                    AnalyzeRuntime.onObservedClick(this@OverlayEntryService)
+                }
             }
         }
     }
