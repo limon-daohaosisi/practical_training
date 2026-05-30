@@ -20,9 +20,13 @@ import com.example.myapplication.core.model.withScreenshot
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
@@ -36,6 +40,7 @@ class CaptureAccessibilityService : AccessibilityService() {
     private var captureSerial = 0
     private var lastCapturePkg = ""
     private var lastCaptureTime = 0L
+    private var lastUiMutationTime = 0L
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -43,7 +48,9 @@ class CaptureAccessibilityService : AccessibilityService() {
         val info = AccessibilityServiceInfo().apply {
             eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
                 AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
-                AccessibilityEvent.TYPE_WINDOWS_CHANGED
+                AccessibilityEvent.TYPE_WINDOWS_CHANGED or
+                AccessibilityEvent.TYPE_VIEW_CLICKED or
+                AccessibilityEvent.TYPE_TOUCH_INTERACTION_END
             feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
             notificationTimeout = 300
             if (Build.VERSION.SDK_INT >= 34) {
@@ -64,6 +71,17 @@ class CaptureAccessibilityService : AccessibilityService() {
 
         if (pkg == packageName || pkg.isEmpty()) return
 
+        if (event.isUiMutation()) {
+            lastUiMutationTime = System.currentTimeMillis()
+        }
+
+        if (event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED ||
+            event.eventType == AccessibilityEvent.TYPE_TOUCH_INTERACTION_END
+        ) {
+            observedClickEvents.tryEmit(Unit)
+            appendLog("${timeNow()} observed INTERACTION | pkg=$pkg | type=$typeName")
+        }
+
         if (isLauncherPackage(pkg)) {
             appendLog("${timeNow()} capture SKIP | pkg=$pkg | reason=launcher")
             return
@@ -81,6 +99,13 @@ class CaptureAccessibilityService : AccessibilityService() {
         val lower = pkg.lowercase()
         return lower.contains("launcher") || lower.endsWith(".home")
     }
+
+    private fun AccessibilityEvent.isUiMutation(): Boolean =
+        eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+            eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
+            eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED ||
+            eventType == AccessibilityEvent.TYPE_VIEW_CLICKED ||
+            eventType == AccessibilityEvent.TYPE_TOUCH_INTERACTION_END
 
     override fun onInterrupt() {
         appendLog("${timeNow()} SERVICE_INTERRUPTED")
@@ -163,6 +188,62 @@ class CaptureAccessibilityService : AccessibilityService() {
 
     @Suppress("DEPRECATION")
     private suspend fun captureCurrentWindowNow(): CaptureResult {
+        val base = captureStableWindow()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            error("Explicit screenshot capture requires API 30+.")
+        }
+        val screenshot = takeScreenshotNow(base.packageName)
+        val completed = base.withScreenshot(screenshot)
+        lastCapture.value = completed
+        lastScreenshotPath.value = screenshot.savedPath
+        appendLog("${timeNow()} capture NOW | pkg=${base.packageName} | nodes=${base.nodes.size} | screen=${base.screenWidth}x${base.screenHeight} | screenshot=${screenshot.imageWidth}x${screenshot.imageHeight}")
+        return completed
+    }
+
+    @Suppress("DEPRECATION")
+    private suspend fun captureStableWindow(): CaptureResult {
+        waitForUiQuiet()
+        var previous = captureWindowTreeNow()
+
+        repeat(STABILITY_SAMPLE_COUNT - 1) { attempt ->
+            delay(STABILITY_SAMPLE_DELAY_MS)
+            waitForUiQuiet()
+            val current = captureWindowTreeNow()
+            if (previous.hasSameCaptureSignature(current)) {
+                return current
+            }
+            appendLog("${timeNow()} capture RESAMPLE | reason=unstable-tree | attempt=${attempt + 1}")
+            previous = current
+        }
+
+        appendLog("${timeNow()} capture USE_LATEST | reason=stability-timeout")
+        return previous
+    }
+
+    private suspend fun waitForUiQuiet() {
+        val startTime = System.currentTimeMillis()
+        var didWait = false
+
+        while (true) {
+            val now = System.currentTimeMillis()
+            val quietFor = now - lastUiMutationTime
+            val remainingQuietMs = UI_QUIET_PERIOD_MS - quietFor
+            val remainingBudgetMs = UI_QUIET_TIMEOUT_MS - (now - startTime)
+
+            if (remainingQuietMs <= 0 || remainingBudgetMs <= 0) {
+                if (didWait) {
+                    appendLog("${timeNow()} capture WAIT | quietFor=${maxOf(0L, quietFor)}ms")
+                }
+                return
+            }
+
+            didWait = true
+            delay(minOf(remainingQuietMs, remainingBudgetMs, UI_QUIET_POLL_MS))
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun captureWindowTreeNow(): CaptureResult {
         val root = findRoot() ?: error("No active accessibility root is available.")
         val disp = resources.displayMetrics
         val rect = Rect()
@@ -180,15 +261,8 @@ class CaptureAccessibilityService : AccessibilityService() {
             screenWidth = disp.widthPixels,
             screenHeight = disp.heightPixels
         )
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            error("Explicit screenshot capture requires API 30+.")
-        }
-        val screenshot = takeScreenshotNow(currentPkg)
-        val completed = base.withScreenshot(screenshot)
-        lastCapture.value = completed
-        lastScreenshotPath.value = screenshot.savedPath
-        appendLog("${timeNow()} capture NOW | pkg=$currentPkg | nodes=${nodes.size} | screen=${disp.widthPixels}x${disp.heightPixels} | screenshot=${screenshot.imageWidth}x${screenshot.imageHeight}")
-        return completed
+        lastCapture.value = base
+        return base
     }
 
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
@@ -372,10 +446,18 @@ class CaptureAccessibilityService : AccessibilityService() {
         private const val MAX_RETRIES = 2
         private const val RETRY_DELAY_MS = 150L
         private const val DEBOUNCE_MS = 800L
+        private const val UI_QUIET_PERIOD_MS = 450L
+        private const val UI_QUIET_TIMEOUT_MS = 1_500L
+        private const val UI_QUIET_POLL_MS = 80L
+        private const val STABILITY_SAMPLE_DELAY_MS = 80L
+        private const val STABILITY_SAMPLE_COUNT = 3
         private val dateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
         private val eventLog = MutableStateFlow<List<String>>(emptyList())
         val events: StateFlow<List<String>> = eventLog.asStateFlow()
+
+        private val observedClickEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 8)
+        val observedClicks: SharedFlow<Unit> = observedClickEvents.asSharedFlow()
 
         private val lastCapture = MutableStateFlow<CaptureResult?>(null)
         val capture: StateFlow<CaptureResult?> = lastCapture.asStateFlow()
@@ -401,6 +483,7 @@ class CaptureAccessibilityService : AccessibilityService() {
             }
             return deferred.await()
         }
+
     }
 
     override fun onCreate() {
@@ -413,3 +496,21 @@ class CaptureAccessibilityService : AccessibilityService() {
         return super.onUnbind(intent)
     }
 }
+
+private fun CaptureResult.hasSameCaptureSignature(other: CaptureResult): Boolean =
+    packageName == other.packageName &&
+        activityName == other.activityName &&
+        screenWidth == other.screenWidth &&
+        screenHeight == other.screenHeight &&
+        nodes.map { it.captureSignature() } == other.nodes.map { it.captureSignature() }
+
+private fun com.example.myapplication.core.model.NormalizedNode.captureSignature(): String =
+    listOf(
+        text,
+        contentDescription,
+        className,
+        clickable.toString(),
+        editable.toString(),
+        enabled.toString(),
+        "${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}",
+    ).joinToString(separator = "|")

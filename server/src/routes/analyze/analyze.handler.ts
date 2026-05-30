@@ -80,6 +80,73 @@ export function createAnalyzeHandler(
       } satisfies AnalyzeError);
     }
 
+    if (process.env.ANALYZE_MOCK_ACTION === "tap") {
+      const fallbackWidth = Math.max(1, metadata.screenWidth);
+      const fallbackHeight = Math.max(1, metadata.screenHeight);
+      const fallbackTarget = metadata.nodes.find((node) => node.clickable);
+      const conversationId = metadata.conversationId ?? randomUUID();
+      const runId = randomUUID();
+
+      return reply.send({
+        conversationId,
+        runId,
+        conversationStatus: "waiting_interaction",
+        answer: "临时 mock：请点击高亮区域",
+        target: fallbackTarget
+          ? {
+              label:
+                fallbackTarget.text ||
+                fallbackTarget.contentDescription ||
+                "目标区域",
+              bounds: fallbackTarget.bounds,
+            }
+          : {
+              label: "目标区域",
+              bounds: {
+                left: Math.round(fallbackWidth * 0.2),
+                top: Math.round(fallbackHeight * 0.35),
+                right: Math.round(fallbackWidth * 0.8),
+                bottom: Math.round(fallbackHeight * 0.5),
+              },
+            },
+        action: { type: "tap" },
+        savedMetadataPath,
+        savedScreenshotPath,
+      } satisfies AnalyzeResponse);
+    }
+
+    if (process.env.ANALYZE_MOCK_ACTION === "scroll") {
+      const conversationId = metadata.conversationId ?? randomUUID();
+      const runId = randomUUID();
+
+      return reply.send({
+        conversationId,
+        runId,
+        conversationStatus: "waiting_interaction",
+        answer: "临时 mock：请上下滑动页面",
+        target: null,
+        action: { type: "scroll" },
+        savedMetadataPath,
+        savedScreenshotPath,
+      } satisfies AnalyzeResponse);
+    }
+
+    if (process.env.ANALYZE_MOCK_ACTION === "completed") {
+      const conversationId = metadata.conversationId ?? randomUUID();
+      const runId = randomUUID();
+
+      return reply.send({
+        conversationId,
+        runId,
+        conversationStatus: "completed",
+        answer: "临时 mock：引导已完成",
+        target: null,
+        action: { type: "none" },
+        savedMetadataPath,
+        savedScreenshotPath,
+      } satisfies AnalyzeResponse);
+    }
+
     /* ------------------------------------------------------------------ */
     /*  Without DB — run agent directly (existing contract test path)      */
     /* ------------------------------------------------------------------ */
