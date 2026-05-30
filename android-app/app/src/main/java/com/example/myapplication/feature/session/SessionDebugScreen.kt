@@ -1,9 +1,14 @@
 package com.example.myapplication.feature.session
 
+import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -85,6 +90,7 @@ fun SessionDebugScreen(
                             }
                             Spacer(modifier = Modifier.width(8.dp))
                             Button(onClick = {
+                                requestAudioPermissionIfNeeded(context)
                                 if (Settings.canDrawOverlays(context)) {
                                     context.startService(Intent(context, OverlayEntryService::class.java))
                                 } else {
@@ -174,6 +180,27 @@ fun SessionDebugScreen(
         }
     }
 }
+
+private fun requestAudioPermissionIfNeeded(context: Context) {
+    if (
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO,
+        ) == PackageManager.PERMISSION_GRANTED
+    ) {
+        return
+    }
+
+    (context as? Activity)?.let { activity ->
+        ActivityCompat.requestPermissions(
+            activity,
+            arrayOf(Manifest.permission.RECORD_AUDIO),
+            RECORD_AUDIO_REQUEST_CODE,
+        )
+    }
+}
+
+private const val RECORD_AUDIO_REQUEST_CODE = 2101
 
 private fun AnalyzeRequestState.renderLabel(): String = when (this) {
     AnalyzeRequestState.Idle -> "idle"
