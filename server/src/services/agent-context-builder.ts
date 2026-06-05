@@ -29,7 +29,7 @@ function buildUserMessageContent(
   options: BuildAgentChatMessagesOptions,
 ): ChatCompletionMessage["content"] {
   const text = JSON.stringify(buildUserContext(input), null, 2);
-  if (!options.includeScreenshot) {
+  if (options.includeScreenshot === false) {
     return text;
   }
 

@@ -14,6 +14,10 @@ type OpenAiCompatibleClientOptions = {
 };
 
 type ChatCompletionResponse = {
+  error?: {
+    code?: string;
+    message?: string;
+  };
   choices?: Array<{
     message?: {
       content?: string | null;
@@ -80,6 +84,12 @@ export class OpenAiCompatibleClient implements ModelClient {
     }
 
     const parsed = raw as ChatCompletionResponse;
+    if (parsed.error) {
+      throw new Error(
+        `OpenAI compatible chat completion failed: ${parsed.error.message ?? parsed.error.code ?? "unknown error"}.`,
+      );
+    }
+
     const content = parsed.choices?.[0]?.message?.content;
     if (!content) {
       throw new Error("OpenAI compatible response did not include content.");

@@ -28,7 +28,7 @@ export function createOpenAiCompatibleAgentRunnerFromEnv(
   return new OpenAiCompatibleAgentRunner({
     modelClient,
     model,
-    includeScreenshot: env.OPENAI_INCLUDE_SCREENSHOT === "true",
+    includeScreenshot: env.OPENAI_INCLUDE_SCREENSHOT !== "false",
   });
 }
 
@@ -40,7 +40,7 @@ export class OpenAiCompatibleAgentRunner implements AgentRunner {
   constructor(options: OpenAiCompatibleAgentRunnerOptions) {
     this.modelClient = options.modelClient;
     this.model = options.model;
-    this.includeScreenshot = options.includeScreenshot ?? false;
+    this.includeScreenshot = options.includeScreenshot ?? true;
   }
 
   async run(input: AgentRunInput): Promise<AgentRunOutput> {

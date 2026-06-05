@@ -39,8 +39,10 @@ function createInput(overrides: Partial<AgentRunInput> = {}): AgentRunInput {
 }
 
 describe("buildAgentChatMessages", () => {
-  it("builds first speech context with goal and node summary", () => {
-    const messages = buildAgentChatMessages(createInput());
+  it("builds text-only first speech context when screenshot is disabled", () => {
+    const messages = buildAgentChatMessages(createInput(), {
+      includeScreenshot: false,
+    });
     const userContext = JSON.parse(getUserText(messages)) as {
       task: { goal: string; contextFocus: string };
       nodes: Array<{ text: string }>;
@@ -55,7 +57,15 @@ describe("buildAgentChatMessages", () => {
     expect(typeof messages[1]?.content).toBe("string");
   });
 
-  it("can include screenshot as an image_url content part", () => {
+  it("includes screenshot as an image_url content part by default", () => {
+    const messages = buildAgentChatMessages(createInput());
+
+    expect(getUserImageUrl(messages)).toBe(
+      "data:image/jpeg;base64,ZmFrZS1qcGVnLWJpbmFyeQ==",
+    );
+  });
+
+  it("can explicitly include screenshot as an image_url content part", () => {
     const messages = buildAgentChatMessages(createInput(), {
       includeScreenshot: true,
     });
@@ -87,6 +97,7 @@ describe("buildAgentChatMessages", () => {
           },
         ],
       }),
+      { includeScreenshot: false },
     );
     const userContext = JSON.parse(getUserText(messages)) as {
       task: { messageType: string; contextFocus: string };
@@ -101,6 +112,7 @@ describe("buildAgentChatMessages", () => {
   it("builds context when recentMessages is empty", () => {
     const messages = buildAgentChatMessages(
       createInput({ recentMessages: [] }),
+      { includeScreenshot: false },
     );
     const userContext = JSON.parse(getUserText(messages)) as {
       recentMessages: unknown[];

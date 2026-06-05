@@ -7,6 +7,8 @@ import { registerAnalyzeRoutes } from "./routes/analyze/analyze.route.js";
 import { registerCancelRoutes } from "./routes/cancel/cancel.route.js";
 import { registerHealthRoutes } from "./routes/health/health.route.js";
 
+const DEFAULT_BODY_LIMIT_BYTES = 10 * 1024 * 1024;
+
 type BuildAppOptions = {
   agentRunner?: AgentRunner;
   dbClient?: DbClient;
@@ -15,6 +17,7 @@ type BuildAppOptions = {
 export function buildApp(options: BuildAppOptions = {}) {
   const app = Fastify({
     logger: true,
+    bodyLimit: DEFAULT_BODY_LIMIT_BYTES,
   });
   const agentRunner = options.agentRunner ?? mockAgentRunner;
 

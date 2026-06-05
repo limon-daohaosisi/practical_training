@@ -90,6 +90,32 @@ describe("OpenAiCompatibleAgentRunner", () => {
       shouldContinue: true,
     });
     expect(modelClient.lastInput?.model).toBe("test-model");
+    expect(Array.isArray(modelClient.lastInput?.messages[1]?.content)).toBe(
+      true,
+    );
+  });
+
+  it("can disable screenshot input for text-only models", async () => {
+    const modelClient = new FakeModelClient(
+      JSON.stringify({
+        answer: "请点击设置",
+        action: { type: "tap" },
+        target: {
+          label: "设置",
+          bounds: { left: 900, top: 80, right: 1040, bottom: 220 },
+        },
+        shouldContinue: true,
+      }),
+    );
+    const runner = new OpenAiCompatibleAgentRunner({
+      modelClient,
+      model: "test-model",
+      includeScreenshot: false,
+    });
+
+    await runner.run(createInput());
+
+    expect(typeof modelClient.lastInput?.messages[1]?.content).toBe("string");
   });
 
   it("returns completed output when the model says the goal is done", async () => {
