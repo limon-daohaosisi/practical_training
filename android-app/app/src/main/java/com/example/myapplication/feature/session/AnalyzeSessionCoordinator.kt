@@ -7,8 +7,11 @@ import com.example.myapplication.core.network.AnalyzeRequest
 import com.example.myapplication.core.network.AnalyzeResponse
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -31,10 +34,12 @@ class AnalyzeSessionCoordinator(
     private val analyzeGateway: AnalyzeGateway
 ) {
     private val mutableState = MutableStateFlow<AnalyzeRequestState>(AnalyzeRequestState.Idle)
+    private val mutableResponseText = MutableSharedFlow<String>(extraBufferCapacity = 4)
     private val followUpMutex = Mutex()
     private var sessionVersion = 0
     private var pendingObservedMessageType: String? = null
     val state: StateFlow<AnalyzeRequestState> = mutableState.asStateFlow()
+    val responseText: SharedFlow<String> = mutableResponseText.asSharedFlow()
 
     val isRunning: Boolean
         get() = mutableState.value.isRunningState()
@@ -113,6 +118,9 @@ class AnalyzeSessionCoordinator(
                 val response = analyzeGateway.analyze(request, capture)
                 if (version != sessionVersion) return
 
+                if (response.answer.isNotBlank()) {
+                    mutableResponseText.emit(response.answer)
+                }
                 mutableState.value = response.toRequestState()
                 return
             } catch (error: Exception) {

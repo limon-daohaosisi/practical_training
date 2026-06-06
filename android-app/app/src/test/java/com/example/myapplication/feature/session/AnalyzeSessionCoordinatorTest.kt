@@ -12,6 +12,7 @@ import com.example.myapplication.core.network.AnalyzeResponse
 import com.example.myapplication.core.network.CancelResponse
 import com.example.myapplication.core.network.TargetInfo
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -73,6 +74,40 @@ class AnalyzeSessionCoordinatorTest {
             ),
             coordinator.state.value,
         )
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun requestAnalyze_emitsResponseTextForSpeechOutput() = runTest {
+        val captureGateway = object : CaptureGateway {
+            override suspend fun captureNow(): CaptureResult = sampleCapture()
+        }
+        val analyzeGateway = object : AnalyzeGateway {
+            override suspend fun analyze(
+                request: AnalyzeRequest,
+                capture: CaptureResult,
+            ): AnalyzeResponse =
+                AnalyzeResponse(
+                    conversationId = CONVERSATION_ID,
+                    runId = "22222222-2222-4222-8222-222222222222",
+                    conversationStatus = "completed",
+                    answer = "已完成分析",
+                    target = null,
+                    action = ActionInfo(type = "none"),
+                )
+
+            override suspend fun cancel(conversationId: String): CancelResponse =
+                cancelResponse(conversationId)
+        }
+        val coordinator = AnalyzeSessionCoordinator(captureGateway, analyzeGateway)
+        val responseText = launch {
+            assertEquals("已完成分析", coordinator.responseText.first())
+        }
+        runCurrent()
+
+        coordinator.requestAnalyze("请分析当前页面")
+
+        responseText.join()
     }
 
     @Test

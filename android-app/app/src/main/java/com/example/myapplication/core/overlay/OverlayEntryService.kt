@@ -8,14 +8,18 @@ import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.os.IBinder
+import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.Toast
 import com.example.myapplication.core.accessibility.CaptureAccessibilityService
 import com.example.myapplication.core.model.GuidanceCue
 import com.example.myapplication.core.session.AnalyzeRuntime
+import com.example.myapplication.core.speech.AndroidSpeechController
 import com.example.myapplication.feature.session.isRunningState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +31,13 @@ import kotlinx.coroutines.launch
 class OverlayEntryService : Service() {
 
     private lateinit var windowManager: WindowManager
-    private var overlayButton: View? = null
+    private lateinit var speechController: AndroidSpeechController
+    private var overlayControl: View? = null
+    private var questionInput: EditText? = null
+    private var questionDraft: String = ""
+    private var speechFallbackDraft: String? = null
+    private var latestRunningState: Boolean = false
+    private var isCollapsed: Boolean = false
     private var guidanceView: GuidanceOverlayView? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -36,8 +46,15 @@ class OverlayEntryService : Service() {
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        speechController = AndroidSpeechController(
+            context = this,
+            onPartialText = ::fillSpeechPartialText,
+            onFinalText = ::commitSpeechText,
+            onRecoverableError = ::restoreSpeechFallback,
+            onError = ::showToast,
+        )
         showGuidanceLayer()
-        showOverlayButton()
+        renderOverlayControl(isRunning = false)
         observeAnalyzeState()
         observeUserClicks()
     }
@@ -45,40 +62,158 @@ class OverlayEntryService : Service() {
     override fun onDestroy() {
         guidanceView?.let(windowManager::removeView)
         guidanceView = null
-        overlayButton?.let(windowManager::removeView)
-        overlayButton = null
+        removeOverlayControl()
+        speechController.destroy()
         serviceScope.cancel()
         super.onDestroy()
     }
 
-    private fun showOverlayButton() {
-        if (overlayButton != null) return
+    private fun renderOverlayControl(isRunning: Boolean) {
+        latestRunningState = isRunning
+        val currentMode = overlayControl?.tag as? OverlayMode
+        val nextMode = when {
+            isCollapsed -> OverlayMode.Collapsed
+            isRunning -> OverlayMode.Running
+            else -> OverlayMode.Input
+        }
+        if (currentMode == nextMode) return
 
-        val button = Button(this).apply {
-            text = "分析"
-            setOnClickListener {
-                serviceScope.launch {
-                    val wasRunning = AnalyzeRuntime.isRunning(this@OverlayEntryService)
-                    runCatching {
-                        if (wasRunning) {
-                            AnalyzeRuntime.cancel(this@OverlayEntryService)
-                        } else {
-                            AnalyzeRuntime.analyzeNow(this@OverlayEntryService)
-                        }
-                    }.onSuccess {
-                        Toast.makeText(
-                            this@OverlayEntryService,
-                            if (wasRunning) "已取消" else "已发送 analyze 请求",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }.onFailure { error ->
-                        Toast.makeText(
-                            this@OverlayEntryService,
-                            error.message ?: "Analyze 失败",
-                            Toast.LENGTH_SHORT
-                        ).show()
+        removeOverlayControl()
+        when (nextMode) {
+            OverlayMode.Input -> showInputWindow()
+            OverlayMode.Running -> showCancelButton()
+            OverlayMode.Collapsed -> showCollapsedButton()
+        }
+    }
+
+    private fun showInputWindow() {
+        val input = EditText(this).apply {
+            hint = "输入问题"
+            minLines = 1
+            maxLines = 3
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            setText(questionDraft)
+            setSelection(questionDraft.length)
+        }
+        questionInput = input
+
+        val panel = LinearLayout(this).apply {
+            tag = OverlayMode.Input
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(6), dp(8), dp(6))
+            setBackgroundColor(Color.argb(230, 34, 34, 34))
+            addView(
+                Button(this@OverlayEntryService).apply {
+                    text = "语音"
+                    setOnClickListener {
+                        speechFallbackDraft = currentQuestionText()
+                        speechController.startListening()
                     }
-                }
+                },
+                LinearLayout.LayoutParams(dp(72), WindowManager.LayoutParams.WRAP_CONTENT),
+            )
+            addView(
+                input,
+                LinearLayout.LayoutParams(0, WindowManager.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    leftMargin = dp(8)
+                    rightMargin = dp(8)
+                },
+            )
+            addView(
+                Button(this@OverlayEntryService).apply {
+                    text = "发送"
+                    setOnClickListener {
+                        sendQuestionFromInput()
+                    }
+                },
+                LinearLayout.LayoutParams(dp(72), WindowManager.LayoutParams.WRAP_CONTENT),
+            )
+            addView(
+                Button(this@OverlayEntryService).apply {
+                    text = "收起"
+                    setOnClickListener {
+                        collapseOverlay()
+                    }
+                },
+                LinearLayout.LayoutParams(dp(64), WindowManager.LayoutParams.WRAP_CONTENT).apply {
+                    leftMargin = dp(8)
+                },
+            )
+        }
+
+        val params = WindowManager.LayoutParams(
+            dp(360),
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.END
+            x = 24
+            y = 180
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+        }
+
+        overlayControl = panel
+        windowManager.addView(panel, params)
+    }
+
+    private fun showCancelButton() {
+        val panel = LinearLayout(this).apply {
+            tag = OverlayMode.Running
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(
+                Button(this@OverlayEntryService).apply {
+                    text = "取消"
+                    setOnClickListener {
+                        serviceScope.launch {
+                            runCatching {
+                                AnalyzeRuntime.cancel(this@OverlayEntryService)
+                            }
+                            showToast("已请求取消")
+                        }
+                    }
+                },
+                LinearLayout.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT),
+            )
+            addView(
+                Button(this@OverlayEntryService).apply {
+                    text = "收起"
+                    setOnClickListener {
+                        collapseOverlay()
+                    }
+                },
+                LinearLayout.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT).apply {
+                    leftMargin = dp(8)
+                },
+            )
+        }
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.END
+            x = 24
+            y = 180
+        }
+
+        overlayControl = panel
+        windowManager.addView(panel, params)
+    }
+
+    private fun showCollapsedButton() {
+        val button = Button(this).apply {
+            tag = OverlayMode.Collapsed
+            text = "展开"
+            setOnClickListener {
+                expandOverlay()
             }
         }
 
@@ -86,17 +221,92 @@ class OverlayEntryService : Service() {
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.END
             x = 24
             y = 180
         }
 
-        overlayButton = button
+        overlayControl = button
         windowManager.addView(button, params)
     }
+
+    private fun sendQuestionFromInput() {
+        val question = questionInput?.text?.toString()?.trim().orEmpty()
+        if (question.isBlank()) {
+            showToast("请输入问题")
+            return
+        }
+
+        speechController.stopListening()
+        clearQuestionDraft()
+        serviceScope.launch {
+            runCatching {
+                AnalyzeRuntime.analyzeNow(this@OverlayEntryService, question)
+            }.onSuccess {
+                showToast("已发送 analyze 请求")
+            }.onFailure { error ->
+                showToast(error.message ?: "Analyze 失败")
+            }
+        }
+    }
+
+    private fun removeOverlayControl() {
+        questionInput?.let { input ->
+            questionDraft = input.text?.toString().orEmpty()
+        }
+        overlayControl?.let(windowManager::removeView)
+        overlayControl = null
+        questionInput = null
+    }
+
+    private fun fillSpeechPartialText(text: String) {
+        fillQuestionInput(text)
+    }
+
+    private fun commitSpeechText(text: String) {
+        speechFallbackDraft = null
+        fillQuestionInput(text)
+    }
+
+    private fun restoreSpeechFallback() {
+        speechFallbackDraft?.let(::fillQuestionInput)
+        speechFallbackDraft = null
+    }
+
+    private fun fillQuestionInput(text: String) {
+        questionDraft = text
+        questionInput?.setText(text)
+        questionInput?.setSelection(text.length)
+    }
+
+    private fun clearQuestionDraft() {
+        questionDraft = ""
+        questionInput?.text?.clear()
+    }
+
+    private fun currentQuestionText(): String =
+        questionInput?.text?.toString() ?: questionDraft
+
+    private fun showToast(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun collapseOverlay() {
+        isCollapsed = true
+        renderOverlayControl(latestRunningState)
+    }
+
+    private fun expandOverlay() {
+        isCollapsed = false
+        renderOverlayControl(latestRunningState)
+    }
+
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt()
 
     private fun showGuidanceLayer() {
         if (guidanceView != null) return
@@ -123,8 +333,12 @@ class OverlayEntryService : Service() {
     private fun observeAnalyzeState() {
         serviceScope.launch {
             AnalyzeRuntime.state(this@OverlayEntryService).collectLatest { state ->
-                (overlayButton as? Button)?.text =
-                    if (state.isRunningState()) "取消" else "分析"
+                renderOverlayControl(state.isRunningState())
+            }
+        }
+        serviceScope.launch {
+            AnalyzeRuntime.responseText(this@OverlayEntryService).collectLatest { answer ->
+                speechController.speak(answer)
             }
         }
         serviceScope.launch {
@@ -143,6 +357,12 @@ class OverlayEntryService : Service() {
             }
         }
     }
+}
+
+private enum class OverlayMode {
+    Input,
+    Running,
+    Collapsed,
 }
 
 private class GuidanceOverlayView(context: android.content.Context) : View(context) {

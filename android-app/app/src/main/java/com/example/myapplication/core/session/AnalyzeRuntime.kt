@@ -40,6 +40,8 @@ object AnalyzeRuntime {
 
     fun state(context: Context) = coordinator(context).state
 
+    fun responseText(context: Context) = coordinator(context).responseText
+
     fun isRunning(context: Context): Boolean = coordinator(context).isRunning
 
     fun shouldListenForObservedInteraction(context: Context): Boolean =
@@ -52,8 +54,8 @@ object AnalyzeRuntime {
         }
     }
 
-    suspend fun analyzeNow(context: Context) {
-        coordinator(context).requestAnalyze(defaultQuestion)
+    suspend fun analyzeNow(context: Context, question: String = defaultQuestion) {
+        coordinator(context).requestAnalyze(question)
     }
 
     suspend fun onObservedClick(context: Context) {
